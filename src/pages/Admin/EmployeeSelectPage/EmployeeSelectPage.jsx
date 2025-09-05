@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Card, Spin, Button, Table, message } from "antd";
+import { Card, Spin, Button, Table, message, Input } from "antd";
 import { useDispatch, useSelector } from "react-redux";
 import { setSelectedEmployees } from "../../../redux/slices/projectSlice";
 import * as EmployeeService from "../../../services/UserService";
@@ -12,71 +12,94 @@ export default function UsersByProjectPage() {
 
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [pagination, setPagination] = useState({ total: 0, page: 1, pageSize: 20 });
+  const [pagination, setPagination] = useState({ total: 0, page: 1, pageSize: 8 });
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
+  const [searchKeyword, setSearchKeyword] = useState("");
 
   const selectedEmployees = useSelector(
     (state) => state.project?.selectedEmployees || []
   );
 
   // ================== Fetch data ==================
-  const fetchData = async (page = 1, pageSize = 20) => {
+  // ================== Fetch data ==================
+  const fetchData = async (page = 1, pageSize = 8, search = "") => {
     setLoading(true);
     try {
       const user = JSON.parse(localStorage.getItem("user"));
-      let userList = [];
 
       if (mode === "add" || mode === "edit") {
-        const allRes = await EmployeeService.getAllUser(user?.access_token);
-        if (Array.isArray(allRes)) {
-          userList = allRes;
-        } else if (allRes?.success) {
-          userList = allRes.data || [];
-        }
-        userList = userList.filter(u => u.roles?.includes("employee"));
-        setUsers(userList);
-        setPagination({ total: userList.length, page, pageSize });
+        const res = await EmployeeService.getAllUser(user?.access_token, {
+          page,
+          limit: pageSize,
+          search,
+        });
 
-        // FIX: Load selectedRowKeys từ nhiều nguồn
+        let userList = [];
+        let totalCount = 0;
+        let currentPage = page;
+        let currentLimit = pageSize;
+
+        if (Array.isArray(res)) {
+          // Không phân biệt role nữa
+          userList = res;
+
+          if (search) {
+            const searchLower = search.toLowerCase();
+            userList = userList.filter(u =>
+              u.name?.toLowerCase().includes(searchLower) ||
+              u.email?.toLowerCase().includes(searchLower)
+            );
+          }
+
+          totalCount = userList.length;
+          userList = userList.slice((page - 1) * pageSize, page * pageSize);
+        } else if (res?.success) {
+          // Không lọc roles
+          userList = res.data || [];
+          totalCount = res.total || userList.length;
+          currentPage = res.page || page;
+          currentLimit = res.limit || pageSize;
+        }
+
+        setUsers(userList);
+        setPagination({ total: totalCount, page: currentPage, pageSize: currentLimit });
+
+        // Xử lý selectedRowKeys cho mode edit (giữ nguyên)
         if (mode === "edit") {
           let initialSelectedIds = [];
-          
-          // Kiểm tra tempFormData trước
+
           const tempFormData = localStorage.getItem("tempFormData");
           if (tempFormData) {
             try {
               const tempData = JSON.parse(tempFormData);
-              if (tempData.selectedEmployees && tempData.selectedEmployees.length > 0) {
-                // Xử lý selectedEmployees từ tempFormData
-                if (typeof tempData.selectedEmployees[0] === 'string') {
+              if (Array.isArray(tempData.selectedEmployees) && tempData.selectedEmployees.length > 0) {
+                if (typeof tempData.selectedEmployees[0] === "string") {
                   initialSelectedIds = tempData.selectedEmployees;
-                } else if (typeof tempData.selectedEmployees[0] === 'object') {
-                  initialSelectedIds = tempData.selectedEmployees.map(e => e.id);
+                } else {
+                  initialSelectedIds = tempData.selectedEmployees.map((e) => e.id);
                 }
-                console.log("Loaded from tempFormData:", initialSelectedIds);
               }
             } catch (e) {
               console.error("Error parsing tempFormData:", e);
             }
           }
 
-          // Nếu không có trong tempFormData, lấy từ Redux
-          if (initialSelectedIds.length === 0 && selectedEmployees.length > 0) {
-            if (typeof selectedEmployees[0] === 'string') {
+          if (!initialSelectedIds.length && selectedEmployees.length > 0) {
+            if (typeof selectedEmployees[0] === "string") {
               initialSelectedIds = selectedEmployees;
-            } else if (typeof selectedEmployees[0] === 'object' && selectedEmployees[0]?.id) {
-              initialSelectedIds = selectedEmployees.map(e => e.id);
+            } else {
+              initialSelectedIds = selectedEmployees.map((e) => e.id);
             }
-            console.log("Loaded from Redux:", initialSelectedIds);
           }
 
-          // Nếu vẫn không có, lấy từ API project employees
-          if (initialSelectedIds.length === 0 && id && id !== "new") {
+          if (!initialSelectedIds.length && id && id !== "new") {
             try {
-              const projectRes = await EmployeeService.getUsersByProject(id, user?.access_token);
+              const projectRes = await EmployeeService.getUsersByProject(
+                id,
+                user?.access_token
+              );
               if (projectRes?.success && projectRes.data) {
-                initialSelectedIds = projectRes.data.map(e => e.id);
-                console.log("Loaded from project API:", initialSelectedIds);
+                initialSelectedIds = projectRes.data.map((e) => e.id);
               }
             } catch (error) {
               console.error("Error fetching project employees:", error);
@@ -88,10 +111,19 @@ export default function UsersByProjectPage() {
       }
 
       if (mode === "view" && id) {
-        const res = await EmployeeService.getUsersByProject(id, user?.access_token);
+        const res = await EmployeeService.getUsersByProject(
+          id,
+          user?.access_token,
+          { page, limit: pageSize, search }
+        );
+
         if (res?.success) {
           setUsers(res.data || []);
-          setPagination({ total: res.data?.length || 0, page, pageSize });
+          setPagination({
+            total: res.total || (res.data || []).length,
+            page: res.page || page,
+            pageSize: res.limit || pageSize
+          });
         }
       }
     } catch (err) {
@@ -111,7 +143,7 @@ export default function UsersByProjectPage() {
     if (mode === "edit" && selectedEmployees.length > 0) {
       // FIX: Kiểm tra xem selectedEmployees là array of IDs hay array of objects
       let reduxSelectedIds = [];
-      
+
       if (typeof selectedEmployees[0] === 'string') {
         // Nếu là array of strings (IDs)
         reduxSelectedIds = selectedEmployees;
@@ -119,11 +151,11 @@ export default function UsersByProjectPage() {
         // Nếu là array of objects
         reduxSelectedIds = selectedEmployees.map(e => e.id);
       }
-      
+
       console.log("=== Redux Sync Employees ===");
       console.log("selectedEmployees type:", typeof selectedEmployees[0]);
       console.log("reduxSelectedIds:", reduxSelectedIds);
-      
+
       setSelectedRowKeys(reduxSelectedIds);
     }
   }, [selectedEmployees, mode]);
@@ -133,16 +165,25 @@ export default function UsersByProjectPage() {
     try {
       const user = JSON.parse(localStorage.getItem("user"));
 
-      const selectedEmployeeDetails = await Promise.all(
-        selectedRowKeys.map(async (employeeId) => {
-          const emp = users.find(u => u.id === employeeId);
-          if (emp) return emp;
-          const res = await EmployeeService.getDetailsUser(employeeId, user?.access_token);
-          return res.data || res;
+      // Lấy thông tin chi tiết của các nhân viên được chọn
+      const selectedDetails = await Promise.all(
+        selectedRowKeys.map(async (id) => {
+          const userInList = users.find(u => u.id === id);
+          if (userInList) {
+            return userInList;
+          }
+          // Nếu không có trong danh sách hiện tại, gọi API lấy chi tiết
+          try {
+            const res = await EmployeeService.getDetailsUser(id, user?.access_token);
+            return res?.data || res;
+          } catch (error) {
+            console.error("Error fetching user details:", error);
+            return null;
+          }
         })
       );
 
-      const validEmployees = selectedEmployeeDetails.filter(Boolean);
+      const validEmployees = selectedDetails.filter(Boolean).map(emp => ({ id: emp.id, name: emp.name, email: emp.email }));
 
       // Cập nhật Redux
       dispatch(setSelectedEmployees(validEmployees));
@@ -215,15 +256,19 @@ export default function UsersByProjectPage() {
     navigate(-1);
   };
 
+  const handleSearch = () => {
+    fetchData(1, pagination.pageSize, searchKeyword);
+  };
+
   // ================== Columns ==================
   const columns = [
     { title: "Email", dataIndex: "email", key: "email" },
     { title: "Tên", dataIndex: "name", key: "name" },
-    { 
-      title: "Vai trò", 
-      dataIndex: "roles", 
-      key: "roles", 
-      render: roles => Array.isArray(roles) ? roles.join(", ") : roles 
+    {
+      title: "Vai trò",
+      dataIndex: "roles",
+      key: "roles",
+      render: (roles) => Array.isArray(roles) ? roles.join(", ") : roles
     },
     {
       title: "Thao tác",
@@ -233,12 +278,12 @@ export default function UsersByProjectPage() {
           Xem chi tiết
         </Button>
       ),
-    },
+    }
   ];
 
   // ===== DEBUG: Log để tracking =====
   useEffect(() => {
-    console.log("=== EmployeeDetailPage State ===");
+    console.log("=== UsersByProjectPage State ===");
     console.log("Selected Row Keys:", selectedRowKeys);
     console.log("Redux selectedEmployees:", selectedEmployees);
     console.log("Users length:", users.length);
@@ -259,23 +304,33 @@ export default function UsersByProjectPage() {
       }
     >
       <Spin spinning={loading}>
+        <Input
+          placeholder="Tìm theo tên hoặc email"
+          value={searchKeyword}
+          onChange={(e) => setSearchKeyword(e.target.value)}
+          onPressEnter={() => fetchData(1, pagination.pageSize, searchKeyword)}
+          style={{ width: 300, height: 40, marginBottom: 16 }}
+        />
+
         <Table
           dataSource={users}
           rowKey="id"
+          size="small"
           rowSelection={
             mode === "add" || mode === "edit"
               ? {
-                  selectedRowKeys,
-                  onChange: setSelectedRowKeys,
-                  type: "checkbox"
-                }
+                selectedRowKeys,
+                onChange: setSelectedRowKeys,
+                type: "checkbox"
+              }
               : undefined
           }
           pagination={{
             current: pagination.page,
             pageSize: pagination.pageSize,
             total: pagination.total,
-            onChange: (page, pageSize) => fetchData(page, pageSize),
+            onChange: (page, pageSize) => fetchData(page, pageSize, searchKeyword),
+            showTotal: (total) => `Tổng ${total} nhân viên`
           }}
           columns={columns}
         />

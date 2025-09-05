@@ -17,127 +17,124 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
 
   // =================== Helper check token ===================
-// =================== Helper check token ===================
-const handleDecoded = () => {
-  let storageData = user?.access_token || localStorage.getItem("access_token");
-  let decoded = {};
-  
-  if (storageData && isJsonString(storageData)) {
-    // Nếu là JSON string thì parse
-    storageData = JSON.parse(storageData);
-  }
-  
-  if (storageData) {
-    try {
-      decoded = jwtDecode(storageData);
-    } catch (error) {
-      console.error("Error decoding token:", error);
-      return { decoded: {}, storageData: null };
-    }
-  }
-  
-  return { decoded, storageData };
-};
+  // =================== Helper check token ===================
+  const handleDecoded = () => {
+    // Chỉ lấy token string từ localStorage, không parse
+    const storageData = localStorage.getItem("access_token");
+    let decoded = {};
 
-const refreshAccessTokenIfNeeded = async () => {
-  const { decoded, storageData } = handleDecoded();
-  const currentTime = Date.now() / 1000;
-  let token = storageData;
-
-  console.log("Checking access token:", decoded);
-  
-  // Chỉ refresh khi token thực sự hết hạn (thêm buffer 5 phút)
-  if (decoded?.exp && decoded.exp < currentTime + 300) {
-    const refreshToken = localStorage.getItem("refresh_token");
-    let parsedRefreshToken = refreshToken;
-    
-    if (refreshToken && isJsonString(refreshToken)) {
-      parsedRefreshToken = JSON.parse(refreshToken);
-    }
-
-    if (parsedRefreshToken) {
+    if (storageData) {
       try {
-        const decodedRefresh = jwtDecode(parsedRefreshToken);
-        if (decodedRefresh.exp > currentTime) {
-          // Refresh access token
-          const data = await UserService.refreshToken(parsedRefreshToken);
-          token = data?.access_token;
+        decoded = jwtDecode(storageData); // jwtDecode tự parse payload
+      } catch (error) {
+        console.error("Error decoding token:", error);
+        return { decoded: {}, storageData: null };
+      }
+    }
 
-          // Update Redux state + localStorage (không JSON.stringify 2 lần)
-          localStorage.setItem("access_token", token);
-          const updatedUser = { ...user, access_token: token };
-          dispatch(updateUser(updatedUser));
-        } else {
-          // Refresh token hết hạn
+    return { decoded, storageData };
+  };
+
+
+  const refreshAccessTokenIfNeeded = async () => {
+    const { decoded, storageData } = handleDecoded();
+    const currentTime = Date.now() / 1000;
+    let token = storageData;
+
+    console.log("Checking access token:", decoded);
+
+    // Chỉ refresh khi token thực sự hết hạn (thêm buffer 5 phút)
+    if (decoded?.exp && decoded.exp < currentTime + 300) {
+      const refreshToken = localStorage.getItem("refresh_token");
+      let parsedRefreshToken = refreshToken;
+
+      if (refreshToken && isJsonString(refreshToken)) {
+        parsedRefreshToken = JSON.parse(refreshToken);
+      }
+
+      if (parsedRefreshToken) {
+        try {
+          const decodedRefresh = jwtDecode(parsedRefreshToken);
+          if (decodedRefresh.exp > currentTime) {
+            // Refresh access token
+            const data = await UserService.refreshToken(parsedRefreshToken);
+            token = data?.access_token;
+
+            // Update Redux state + localStorage (không JSON.stringify 2 lần)
+            localStorage.setItem("access_token", token);
+            const updatedUser = { ...user, access_token: token };
+            dispatch(updateUser(updatedUser));
+          } else {
+            // Refresh token hết hạn
+            dispatch(resetUser());
+            localStorage.clear();
+            return null;
+          }
+        } catch (error) {
+          console.error("Error refreshing token:", error);
           dispatch(resetUser());
           localStorage.clear();
           return null;
         }
-      } catch (error) {
-        console.error("Error refreshing token:", error);
+      } else {
         dispatch(resetUser());
         localStorage.clear();
         return null;
       }
-    } else {
-      dispatch(resetUser());
-      localStorage.clear();
-      return null;
     }
-  }
 
-  return token;
-};
-
-// =================== Axios interceptor - chỉ thêm token, không tự động refresh ===================
-useEffect(() => {
-  const interceptor = UserService.axiosJWT.interceptors.request.use(
-    async (config) => {
-      // Chỉ lấy token hiện tại, không tự động refresh
-      const { storageData } = handleDecoded();
-      
-      if (storageData) {
-        config.headers["token"] = `Bearer ${storageData}`;
-      }
-      
-      return config;
-    },
-    (err) => Promise.reject(err)
-  );
-
-  return () => {
-    UserService.axiosJWT.interceptors.request.eject(interceptor);
+    return token;
   };
-}, [dispatch]);
 
-// =================== Response interceptor để handle 401 ===================
-useEffect(() => {
-  const responseInterceptor = UserService.axiosJWT.interceptors.response.use(
-    (response) => response,
-    async (error) => {
-      if (error.response?.status === 401) {
-        // Token hết hạn, thử refresh
-        const newToken = await refreshAccessTokenIfNeeded();
-        if (newToken) {
-          // Retry request với token mới
-          const originalRequest = error.config;
-          originalRequest.headers["token"] = `Bearer ${newToken}`;
-          return UserService.axiosJWT(originalRequest);
-        } else {
-          // Không refresh được, logout
-          dispatch(resetUser());
-          localStorage.clear();
-          window.location.href = '/sign-in';
+  // =================== Axios interceptor - chỉ thêm token, không tự động refresh ===================
+  useEffect(() => {
+    const interceptor = UserService.axiosJWT.interceptors.request.use(
+      async (config) => {
+        // Chỉ lấy token hiện tại, không tự động refresh
+        const { storageData } = handleDecoded();
+
+        if (storageData) {
+          config.headers["token"] = `Bearer ${storageData}`;
         }
-      }
-      return Promise.reject(error);
-    }
-  );
 
-  return () => {
-    UserService.axiosJWT.interceptors.response.eject(responseInterceptor);
-  };
-}, [dispatch]);
+        return config;
+      },
+      (err) => Promise.reject(err)
+    );
+
+    return () => {
+      UserService.axiosJWT.interceptors.request.eject(interceptor);
+    };
+  }, [dispatch]);
+
+  // =================== Response interceptor để handle 401 ===================
+  useEffect(() => {
+    const responseInterceptor = UserService.axiosJWT.interceptors.response.use(
+      (response) => response,
+      async (error) => {
+        if (error.response?.status === 401) {
+          // Token hết hạn, thử refresh
+          const newToken = await refreshAccessTokenIfNeeded();
+          if (newToken) {
+            // Retry request với token mới
+            const originalRequest = error.config;
+            originalRequest.headers["token"] = `Bearer ${newToken}`;
+            return UserService.axiosJWT(originalRequest);
+          } else {
+            // Không refresh được, logout
+            dispatch(resetUser());
+            localStorage.clear();
+            window.location.href = '/sign-in';
+          }
+        }
+        return Promise.reject(error);
+      }
+    );
+
+    return () => {
+      UserService.axiosJWT.interceptors.response.eject(responseInterceptor);
+    };
+  }, [dispatch]);
 
   const handleGetDetailsUser = async (id, token) => {
     try {
@@ -149,13 +146,13 @@ useEffect(() => {
       const userObj = {
         ...userData,
         role,
-        access_token: token,
+        access_token: token, // token là string
         refresh_token: localStorage.getItem("refresh_token")
-          ? JSON.parse(localStorage.getItem("refresh_token"))
+          ? localStorage.getItem("refresh_token") // lưu string thôi
           : null,
       };
 
-      localStorage.setItem("user", JSON.stringify(userObj));
+      localStorage.setItem("user", JSON.stringify(userObj)); // đây mới là JSON string
       dispatch(updateUser(userObj));
     } catch (err) {
       console.error("Lỗi lấy chi tiết user:", err);
@@ -163,29 +160,30 @@ useEffect(() => {
     }
   };
 
+
   useEffect(() => {
-  const initUser = async () => {
-    setIsLoading(true);
-    try {
-      console.log("Init user: start");
-      const token = await refreshAccessTokenIfNeeded();
-      console.log("Init user: token after refresh check", token);
-      if (token) {
-        const { decoded } = handleDecoded();
-        console.log("Decoded payload:", decoded);
-        if (decoded?.id) {
-          await handleGetDetailsUser(decoded.id, token);
+    const initUser = async () => {
+      setIsLoading(true);
+      try {
+        console.log("Init user: start");
+        const token = await refreshAccessTokenIfNeeded();
+        console.log("Init user: token after refresh check", token);
+        if (token) {
+          const { decoded } = handleDecoded();
+          console.log("Decoded payload:", decoded);
+          if (decoded?.id) {
+            await handleGetDetailsUser(decoded.id, token);
+          }
         }
+      } catch (err) {
+        console.error("Init user error:", err);
+        dispatch(resetUser());
       }
-    } catch (err) {
-      console.error("Init user error:", err);
-      dispatch(resetUser());
-    }
-    setIsLoading(false);
-    console.log("Init user: done");
-  };
-  initUser();
-}, []);
+      setIsLoading(false);
+      console.log("Init user: done");
+    };
+    initUser();
+  }, []);
 
 
   // =================== Axios interceptor tự động refresh ===================

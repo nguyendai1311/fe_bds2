@@ -2,9 +2,6 @@ import axios from "axios";
 
 export const axiosJWT = axios.create();
 
-
-console.log("API_URL:", );
-
 export const loginUser = async (data) => {
   const res = await axios.post(
      `${process.env.REACT_APP_API_URL}/users/sign-in`,
@@ -97,16 +94,20 @@ export const deleteUser = async (id, access_token) => {
   }
 };
 
-export const getAllUser = async (access_token) => {
-  const res = await axiosJWT.get(
-    `${process.env.REACT_APP_API_URL}/users/get-all`,
-    {
+export const getAllUser = async (access_token, { page = 1, limit = 10, search = "" } = {}) => {
+  try {
+    const res = await axiosJWT.get(`${process.env.REACT_APP_API_URL}/users/get-all`, {
+      params: { page, limit, search },
       headers: {
         Authorization: `Bearer ${access_token}`,
       },
-    }
-  );
-  return res.data;
+    });
+
+    return res.data;
+  } catch (err) {
+    console.error("getAllUser error:", err);
+    throw err;
+  }
 };
 
 export const refreshToken = async (refreshToken) => {

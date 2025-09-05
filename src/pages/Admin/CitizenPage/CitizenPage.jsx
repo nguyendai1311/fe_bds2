@@ -52,20 +52,29 @@ export default function CitizenPage() {
   const [editingCitizen, setEditingCitizen] = useState(null);
   const [viewingCitizen, setViewingCitizen] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(8);
+  const [total, setTotal] = useState(0);
 
   const [form] = Form.useForm();
   const user = JSON.parse(localStorage.getItem("user"));
 
   // Hàm fetch data chính
-  const fetchCitizens = async () => {
+  const fetchCitizens = async ({ page = 1, limit = 8, search = "" } = {}) => {
     setLoading(true);
     try {
-      const res = await CitizenService.getAll(user?.access_token);
+      const res = await CitizenService.getAll(user?.access_token, {
+        page,
+        limit,
+        search,
+      });
+
+      // Nếu BE trả về { data: [...], lastDocId: "...", total: ... }
       const data = res?.data || [];
 
       const list = data.map((cit, index) => ({
         key: cit.id || index.toString(),
-        id: cit.id, // Thêm id riêng để dễ sử dụng
+        id: cit.id,
         maHoDan: cit.maHoDan || "",
         hoTenChuSuDung: cit.hoTenChuSuDung || "",
         soDienThoaiLienLac: cit.soDienThoaiLienLac || "",
@@ -77,43 +86,29 @@ export default function CitizenPage() {
         quan: cit.quan || "",
         giaThuoc: cit.giaThuoc || "",
         thongBaoThuHoiDat: cit.thongBaoThuHoiDat
-          ? {
-            ...cit.thongBaoThuHoiDat,
-            ngay: normalizeDate(cit.thongBaoThuHoiDat.ngay),
-          }
+          ? { ...cit.thongBaoThuHoiDat, ngay: normalizeDate(cit.thongBaoThuHoiDat.ngay) }
           : null,
         quyetDinhPheDuyet: cit.quyetDinhPheDuyet
-          ? {
-            ...cit.quyetDinhPheDuyet,
-            ngay: normalizeDate(cit.quyetDinhPheDuyet.ngay),
-          }
+          ? { ...cit.quyetDinhPheDuyet, ngay: normalizeDate(cit.quyetDinhPheDuyet.ngay) }
           : null,
         phuongAnBTHTTDC: cit.phuongAnBTHTTDC
-          ? {
-            ...cit.phuongAnBTHTTDC,
-            ngay: normalizeDate(cit.phuongAnBTHTTDC.ngay),
-          }
+          ? { ...cit.phuongAnBTHTTDC, ngay: normalizeDate(cit.phuongAnBTHTTDC.ngay) }
           : null,
         nhanTienBoiThuongHoTro: cit.daNhanTienBoiThuong
-          ? {
-            ...cit.daNhanTienBoiThuong,
-            ngay: normalizeDate(cit.daNhanTienBoiThuong.ngay),
-          }
+          ? { ...cit.daNhanTienBoiThuong, ngay: normalizeDate(cit.daNhanTienBoiThuong.ngay) }
           : { xacNhan: false, ngay: null, dinhKem: [] },
         banGiaoMatBang: cit.daBanGiaoMatBang
-          ? {
-            ...cit.daBanGiaoMatBang,
-            ngay: normalizeDate(cit.daBanGiaoMatBang.ngay),
-          }
+          ? { ...cit.daBanGiaoMatBang, ngay: normalizeDate(cit.daBanGiaoMatBang.ngay) }
           : { xacNhan: false, ngay: null, dinhKem: [] },
         tongTien: cit.tongSoTienBoiThuongHoTro || "",
         tongTienBangChu: cit.bangChu || "",
         createdAt: normalizeDate(cit.createdAt),
         updatedAt: normalizeDate(cit.updatedAt),
       }));
-
+      setTotal(res.total);
       setCitizens(list);
       setFilteredCitizens(list);
+
     } catch (err) {
       console.error("Error fetching citizens:", err);
       message.error("Không thể tải danh sách dân cư");
@@ -122,10 +117,13 @@ export default function CitizenPage() {
     }
   };
 
+
   // Load data khi component mount
   useEffect(() => {
-    fetchCitizens();
-  }, []);
+    fetchCitizens({ page: currentPage, limit: pageSize });
+  }, [currentPage, pageSize]);
+
+
 
   // Filter theo keyword
   useEffect(() => {
@@ -580,8 +578,11 @@ export default function CitizenPage() {
           placeholder="Tìm theo tên, mã hộ dân, SĐT"
           value={searchKeyword}
           onChange={(e) => setSearchKeyword(e.target.value)}
+          onPressEnter={() => fetchCitizens({ page: 1, limit: pageSize, search: searchKeyword })}
+          onBlur={() => fetchCitizens({ page: 1, limit: pageSize, search: searchKeyword })}
           style={{ width: 300, height: 40 }}
         />
+
 
         <HeaderActions>
           <Button
@@ -599,18 +600,28 @@ export default function CitizenPage() {
       </FilterContainer>
 
       <Spin spinning={loading}>
-        <div className="bg-white rounded-2xl shadow p-4 max-h-[70vh] overflow-y-auto">
+        <div className="bg-white rounded-2xl shadow p-4 ">
           <Table
             columns={columns}
             dataSource={filteredCitizens}
-            pagination={{ pageSize: 8 }}
+            pagination={{
+              current: currentPage,
+              pageSize: pageSize,
+              total: total,
+              onChange: (page, size) => {
+                setCurrentPage(page);
+                setPageSize(size);
+                fetchCitizens({ page, limit: size, search: searchKeyword });
+              },
+            }}
             size="small"
             bordered
-            rowKey="key"
+            rowKey="id"
             className="text-sm [&_.ant-table]:text-sm [&_.ant-table-cell]:px-3 [&_.ant-table-cell]:py-2"
           />
         </div>
       </Spin>
+
 
 
       {/* Modal xóa */}

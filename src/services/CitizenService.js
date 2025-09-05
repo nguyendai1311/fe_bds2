@@ -1,8 +1,9 @@
 import axios from "axios";
 
-export async function getAll(token) {
+export async function getAll(token, { page = 1, limit = 10, search = "" } = {}) {
   const res = await axios.get(`${process.env.REACT_APP_API_URL}/households/get-all`, {
     headers: { Authorization: `Bearer ${token}` },
+    params: { page, limit, search },
   });
   return res.data;
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Card, Spin, Button, Table, message } from "antd";
+import { Card, Spin, Button, Table, message, Input } from "antd";
 import { useDispatch, useSelector } from "react-redux";
 import { setSelectedHouseholds } from "../../../redux/slices/projectSlice";
 import * as HouseholdService from "../../../services/CitizenService";
@@ -12,84 +12,98 @@ export default function DetailPage() {
 
   const [households, setHouseholds] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [pagination, setPagination] = useState({ total: 0, page: 1, pageSize: 20 });
+  const [pagination, setPagination] = useState({ total: 0, page: 1, pageSize: 8 });
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
+  const [searchKeyword, setSearchKeyword] = useState("");
 
   const selectedHouseholds = useSelector(
     (state) => state.project?.selectedHouseholds || []
   );
 
   // ================== Fetch data ==================
-  const fetchData = async (page = 1, pageSize = 20) => {
+  const fetchData = async (page = 1, pageSize = 8, search = "") => {
     setLoading(true);
     try {
       const user = JSON.parse(localStorage.getItem("user"));
-      let householdList = [];
 
       if (mode === "add" || mode === "edit") {
-        const allRes = await HouseholdService.getAll(user?.access_token);
-        householdList = Array.isArray(allRes) ? allRes : allRes?.data || [];
-        setHouseholds(householdList);
-        setPagination({ total: householdList.length, page, pageSize });
+        // Gọi API households có phân trang & search
+        const res = await HouseholdService.getAll(user?.access_token, {
+          page,
+          limit: pageSize,
+          search,
+        });
 
-        // FIX: Load selectedRowKeys từ nhiều nguồn
-        if (mode === "edit") {
-          let initialSelectedIds = [];
-          
-          // Kiểm tra tempFormData trước
-          const tempFormData = localStorage.getItem("tempFormData");
-          if (tempFormData) {
-            try {
-              const tempData = JSON.parse(tempFormData);
-              if (tempData.selectedHouseholds && tempData.selectedHouseholds.length > 0) {
-                // Xử lý selectedHouseholds từ tempFormData
-                if (typeof tempData.selectedHouseholds[0] === 'string') {
-                  initialSelectedIds = tempData.selectedHouseholds;
-                } else if (typeof tempData.selectedHouseholds[0] === 'object') {
-                  initialSelectedIds = tempData.selectedHouseholds.map(h => h.id);
+        if (res?.success) {
+          setHouseholds(res.data || []);
+          setPagination({ total: res.total, page: res.page, pageSize: res.limit });
+
+          // Xử lý selectedRowKeys cho mode edit
+          if (mode === "edit") {
+            let initialSelectedIds = [];
+
+            // 1️⃣ Lấy từ localStorage.tempFormData
+            const tempFormData = localStorage.getItem("tempFormData");
+            if (tempFormData) {
+              try {
+                const tempData = JSON.parse(tempFormData);
+                if (Array.isArray(tempData.selectedHouseholds) && tempData.selectedHouseholds.length > 0) {
+                  if (typeof tempData.selectedHouseholds[0] === "string") {
+                    initialSelectedIds = tempData.selectedHouseholds;
+                  } else {
+                    initialSelectedIds = tempData.selectedHouseholds.map((h) => h.id);
+                  }
+                  console.log("Loaded from tempFormData:", initialSelectedIds);
                 }
-                console.log("Loaded from tempFormData:", initialSelectedIds);
+              } catch (e) {
+                console.error("Error parsing tempFormData:", e);
               }
-            } catch (e) {
-              console.error("Error parsing tempFormData:", e);
             }
-          }
 
-          // Nếu không có trong tempFormData, lấy từ Redux
-          if (initialSelectedIds.length === 0 && selectedHouseholds.length > 0) {
-            if (typeof selectedHouseholds[0] === 'string') {
-              initialSelectedIds = selectedHouseholds;
-            } else if (typeof selectedHouseholds[0] === 'object' && selectedHouseholds[0]?.id) {
-              initialSelectedIds = selectedHouseholds.map(h => h.id);
-            }
-            console.log("Loaded from Redux:", initialSelectedIds);
-          }
-
-          // Nếu vẫn không có, lấy từ API project households
-          if (initialSelectedIds.length === 0 && id && id !== "new") {
-            try {
-              const projectRes = await HouseholdService.getHouseholdsByProject(id, 1, 1000, "", user?.access_token);
-              if (projectRes?.success && projectRes.data) {
-                initialSelectedIds = projectRes.data.map(h => h.id);
-                console.log("Loaded from project API:", initialSelectedIds);
+            // 2️⃣ Nếu không có, lấy từ Redux
+            if (initialSelectedIds.length === 0 && selectedHouseholds.length > 0) {
+              if (typeof selectedHouseholds[0] === "string") {
+                initialSelectedIds = selectedHouseholds;
+              } else {
+                initialSelectedIds = selectedHouseholds.map((h) => h.id);
               }
-            } catch (error) {
-              console.error("Error fetching project households:", error);
+              console.log("Loaded from Redux:", initialSelectedIds);
             }
-          }
 
-          setSelectedRowKeys(initialSelectedIds);
+            // 3️⃣ Nếu vẫn không có, gọi API project households
+            if (initialSelectedIds.length === 0 && id && id !== "new") {
+              try {
+                const projectRes = await HouseholdService.getHouseholdsByProject(
+                  id,
+                  1,
+                  1000,
+                  "",
+                  user?.access_token
+                );
+                if (projectRes?.success && projectRes.data) {
+                  initialSelectedIds = projectRes.data.map((h) => h.id);
+                  console.log("Loaded from project API:", initialSelectedIds);
+                }
+              } catch (error) {
+                console.error("Error fetching project households:", error);
+              }
+            }
+
+            setSelectedRowKeys(initialSelectedIds);
+          }
         }
       }
 
       if (mode === "view" && id) {
+        // Gọi API households trong project
         const res = await HouseholdService.getHouseholdsByProject(
           id,
           page,
           pageSize,
-          "",
+          search,
           user?.access_token
         );
+
         if (res?.success) {
           setHouseholds(res.data || []);
           setPagination({ total: res.total, page: res.page, pageSize: res.limit });
@@ -103,6 +117,7 @@ export default function DetailPage() {
     }
   };
 
+
   useEffect(() => {
     fetchData(1, pagination.pageSize);
   }, [id, mode]);
@@ -112,7 +127,7 @@ export default function DetailPage() {
     if (mode === "edit" && selectedHouseholds.length > 0) {
       // FIX: Kiểm tra xem selectedHouseholds là array of IDs hay array of objects
       let reduxSelectedIds = [];
-      
+
       if (typeof selectedHouseholds[0] === 'string') {
         // Nếu là array of strings (IDs)
         reduxSelectedIds = selectedHouseholds;
@@ -120,11 +135,11 @@ export default function DetailPage() {
         // Nếu là array of objects
         reduxSelectedIds = selectedHouseholds.map(h => h.id);
       }
-      
+
       console.log("=== Redux Sync Households ===");
       console.log("selectedHouseholds type:", typeof selectedHouseholds[0]);
       console.log("reduxSelectedIds:", reduxSelectedIds);
-      
+
       setSelectedRowKeys(reduxSelectedIds);
     }
   }, [selectedHouseholds, mode]);
@@ -205,6 +220,11 @@ export default function DetailPage() {
     navigate(-1);
   };
 
+  const handleSearch = () => {
+    fetchData(1, pagination.pageSize, searchKeyword);
+  };
+
+
   // ================== Columns ==================
   const columns = [
     { title: "Mã hộ dân", dataIndex: "maHoDan", key: "maHoDan" },
@@ -244,16 +264,26 @@ export default function DetailPage() {
       }
     >
       <Spin spinning={loading}>
+        <Input
+          placeholder="Tìm theo tên, mã hộ dân, SĐT"
+          value={searchKeyword}
+          onChange={(e) => setSearchKeyword(e.target.value)}
+          onPressEnter={() => fetchData(1, pagination.pageSize, searchKeyword)}
+          style={{ width: 300, height: 40, marginBottom: 16 }}
+        />
+
+
         <Table
           dataSource={households}
           rowKey="id"
+          size="small"
           rowSelection={
             mode === "add" || mode === "edit"
               ? {
-                  selectedRowKeys,
-                  onChange: setSelectedRowKeys,
-                  type: "checkbox"
-                }
+                selectedRowKeys,
+                onChange: setSelectedRowKeys,
+                type: "checkbox"
+              }
               : undefined
           }
           pagination={{
