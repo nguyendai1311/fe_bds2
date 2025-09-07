@@ -9,12 +9,14 @@ import {
   SunIcon,
   CloudIcon
 } from "@heroicons/react/24/outline"
+import { useNavigate } from "react-router-dom";
 
 const Header = () => {
   const location = useLocation()
   const [open, setOpen] = useState(false)
   const [weather, setWeather] = useState(null)
   const [time, setTime] = useState(new Date())
+  const navigate = useNavigate();
   const formattedTime = new Intl.DateTimeFormat("vi-VN", {
     hour: "2-digit",
     minute: "2-digit",
@@ -138,7 +140,10 @@ const Header = () => {
           />
           {open && (
             <div className="absolute right-0 mt-2 w-44 bg-white shadow-lg rounded-lg border text-sm overflow-hidden">
-              <button className="flex items-center gap-2 px-4 py-2 w-full hover:bg-gray-50">
+              <button
+                onClick={() => navigate("/profile-user")}
+                className="flex items-center gap-2 px-4 py-2 w-full hover:bg-gray-50"
+              >
                 <UserCircleIcon className="w-4 h-4 text-gray-600" />
                 Thông tin
               </button>

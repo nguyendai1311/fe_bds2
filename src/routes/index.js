@@ -1,5 +1,5 @@
 import SignInPage from "../pages/User/SignInPages/SignInPages";
-import ProfilePage from "../pages/User/ProfilePages/ProfilePages";
+import ProfilePage from "../pages/ProfilePage/ProfilePage";
 import AdminLayout from "../pages/Admin/AdminLayout/AdminLayout";
 import AdminDashboard from "../pages/Admin/AdminDashboard/AdminDashboard";
 import ReportPage from "../pages/Admin/ReportPage/ReportPage";

@@ -14,10 +14,11 @@ export default function DetailPage() {
   const [loading, setLoading] = useState(false);
   const [pagination, setPagination] = useState({ total: 0, page: 1, pageSize: 8 });
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
+  const [tempSelectedRowKeys, setTempSelectedRowKeys] = useState([]);
   const [searchKeyword, setSearchKeyword] = useState("");
 
   const selectedHouseholds = useSelector(
-    (state) => state.project?.selectedHouseholds || []
+    state => state.project?.selectedHouseholds || []
   );
 
   // ================== Fetch data ==================
@@ -25,88 +26,73 @@ export default function DetailPage() {
     setLoading(true);
     try {
       const user = JSON.parse(localStorage.getItem("user"));
+      let householdList = [];
+      let totalCount = 0;
 
       if (mode === "add" || mode === "edit") {
-        // Gọi API households có phân trang & search
         const res = await HouseholdService.getAll(user?.access_token, {
           page,
           limit: pageSize,
-          search,
+          search
         });
 
         if (res?.success) {
-          setHouseholds(res.data || []);
-          setPagination({ total: res.total, page: res.page, pageSize: res.limit });
+          householdList = res.data || [];
+          totalCount = res.total || householdList.length;
+          setHouseholds(householdList);
+          setPagination({ total: totalCount, page, pageSize });
 
-          // Xử lý selectedRowKeys cho mode edit
-          if (mode === "edit") {
+          // Init tempSelectedRowKeys (only once)
+          if (mode === "edit" && tempSelectedRowKeys.length === 0) {
             let initialSelectedIds = [];
 
-            // 1️⃣ Lấy từ localStorage.tempFormData
             const tempFormData = localStorage.getItem("tempFormData");
             if (tempFormData) {
               try {
                 const tempData = JSON.parse(tempFormData);
                 if (Array.isArray(tempData.selectedHouseholds) && tempData.selectedHouseholds.length > 0) {
-                  if (typeof tempData.selectedHouseholds[0] === "string") {
-                    initialSelectedIds = tempData.selectedHouseholds;
-                  } else {
-                    initialSelectedIds = tempData.selectedHouseholds.map((h) => h.id);
-                  }
-                  console.log("Loaded from tempFormData:", initialSelectedIds);
+                  initialSelectedIds = typeof tempData.selectedHouseholds[0] === "string"
+                    ? tempData.selectedHouseholds
+                    : tempData.selectedHouseholds.map(h => h.id);
                 }
-              } catch (e) {
-                console.error("Error parsing tempFormData:", e);
+              } catch (err) {
+                console.error("Error parsing tempFormData:", err);
               }
             }
 
-            // 2️⃣ Nếu không có, lấy từ Redux
             if (initialSelectedIds.length === 0 && selectedHouseholds.length > 0) {
-              if (typeof selectedHouseholds[0] === "string") {
-                initialSelectedIds = selectedHouseholds;
-              } else {
-                initialSelectedIds = selectedHouseholds.map((h) => h.id);
-              }
-              console.log("Loaded from Redux:", initialSelectedIds);
+              initialSelectedIds = typeof selectedHouseholds[0] === "string"
+                ? selectedHouseholds
+                : selectedHouseholds.map(h => h.id);
             }
 
-            // 3️⃣ Nếu vẫn không có, gọi API project households
             if (initialSelectedIds.length === 0 && id && id !== "new") {
               try {
                 const projectRes = await HouseholdService.getHouseholdsByProject(
-                  id,
-                  1,
-                  1000,
-                  "",
-                  user?.access_token
+                  id, 1, 1000, "", user?.access_token
                 );
                 if (projectRes?.success && projectRes.data) {
-                  initialSelectedIds = projectRes.data.map((h) => h.id);
-                  console.log("Loaded from project API:", initialSelectedIds);
+                  initialSelectedIds = projectRes.data.map(h => h.id);
                 }
-              } catch (error) {
-                console.error("Error fetching project households:", error);
+              } catch (err) {
+                console.error("Error fetching project households:", err);
               }
             }
 
-            setSelectedRowKeys(initialSelectedIds);
+            setTempSelectedRowKeys(initialSelectedIds);
           }
         }
       }
 
       if (mode === "view" && id) {
-        // Gọi API households trong project
         const res = await HouseholdService.getHouseholdsByProject(
-          id,
-          page,
-          pageSize,
-          search,
-          user?.access_token
+          id, page, pageSize, search, user?.access_token
         );
-
         if (res?.success) {
-          setHouseholds(res.data || []);
-          setPagination({ total: res.total, page: res.page, pageSize: res.limit });
+          householdList = res.data || [];
+          totalCount = res.total || householdList.length;
+          setHouseholds(householdList);
+          setPagination({ total: totalCount, page, pageSize });
         }
       }
     } catch (err) {
@@ -117,44 +103,25 @@ export default function DetailPage() {
     }
   };
 
-
   useEffect(() => {
     fetchData(1, pagination.pageSize);
   }, [id, mode]);
 
-  // Thêm useEffect để sync với Redux khi selectedHouseholds thay đổi từ bên ngoài
+  // ================== Sync selectedRowKeys với tempSelectedRowKeys ==================
   useEffect(() => {
-    if (mode === "edit" && selectedHouseholds.length > 0) {
-      // FIX: Kiểm tra xem selectedHouseholds là array of IDs hay array of objects
-      let reduxSelectedIds = [];
-
-      if (typeof selectedHouseholds[0] === 'string') {
-        // Nếu là array of strings (IDs)
-        reduxSelectedIds = selectedHouseholds;
-      } else if (typeof selectedHouseholds[0] === 'object' && selectedHouseholds[0]?.id) {
-        // Nếu là array of objects
-        reduxSelectedIds = selectedHouseholds.map(h => h.id);
-      }
-
-      console.log("=== Redux Sync Households ===");
-      console.log("selectedHouseholds type:", typeof selectedHouseholds[0]);
-      console.log("reduxSelectedIds:", reduxSelectedIds);
-
-      setSelectedRowKeys(reduxSelectedIds);
-    }
-  }, [selectedHouseholds, mode]);
+    const currentPageKeys = households.map(h => h.id);
+    const currentSelectedKeys = tempSelectedRowKeys.filter(k => currentPageKeys.includes(k));
+    setSelectedRowKeys(currentSelectedKeys);
+  }, [households, tempSelectedRowKeys]);
 
   // ================== Confirm chọn hộ dân ==================
   const handleConfirm = () => {
     try {
-      const validHouseholds = selectedRowKeys.map(id => ({ id }));
+      const validHouseholds = tempSelectedRowKeys.map(id => ({ id }));
 
-      // Cập nhật Redux
       dispatch(setSelectedHouseholds(validHouseholds));
 
-      // Lấy tempFormData hiện tại
       const existingTempData = JSON.parse(localStorage.getItem("tempFormData") || "{}");
-
       const updatedTempData = {
         ...existingTempData,
         selectedHouseholds: validHouseholds,
@@ -162,12 +129,10 @@ export default function DetailPage() {
         selectedLandPrices: existingTempData.selectedLandPrices || [],
         formValues: existingTempData.formValues || {},
         timestamp: Date.now(),
-        lastModified: "households",
+        lastModified: "households"
       };
-
       localStorage.setItem("tempFormData", JSON.stringify(updatedTempData));
 
-      // Cập nhật reopenModal
       const reopenData = {
         type: id === "new" ? "add" : "edit",
         projectId: id === "new" ? "new" : id,
@@ -175,15 +140,10 @@ export default function DetailPage() {
           formValues: updatedTempData.formValues,
           selectedEmployees: updatedTempData.selectedEmployees,
           selectedHouseholds: updatedTempData.selectedHouseholds,
-          selectedLandPrices: updatedTempData.selectedLandPrices,
-        },
+          selectedLandPrices: updatedTempData.selectedLandPrices
+        }
       };
-
       localStorage.setItem("reopenModal", JSON.stringify(reopenData));
-
-      console.log("=== Updated Household Data ===");
-      console.log("Selected Households:", validHouseholds);
-      console.log("TempFormData:", updatedTempData);
 
       message.success("Đã chọn/cập nhật hộ dân thành công!");
       navigate(-1);
@@ -196,7 +156,6 @@ export default function DetailPage() {
   // ================== Cancel ==================
   const handleCancel = () => {
     const existingTempData = JSON.parse(localStorage.getItem("tempFormData") || "{}");
-
     const reopenData = {
       type: id === "new" ? "add" : "edit",
       projectId: id === "new" ? "new" : id,
@@ -204,26 +163,21 @@ export default function DetailPage() {
         formValues: existingTempData.formValues || {},
         selectedEmployees: existingTempData.selectedEmployees || [],
         selectedHouseholds: existingTempData.selectedHouseholds || [],
-        selectedLandPrices: existingTempData.selectedLandPrices || [],
-      },
+        selectedLandPrices: existingTempData.selectedLandPrices || []
+      }
     };
-
     localStorage.setItem("reopenModal", JSON.stringify(reopenData));
     navigate(-1);
   };
 
   const handleBackView = () => {
-    localStorage.setItem(
-      "reopenModal",
-      JSON.stringify({ type: "view", projectId: id })
-    );
+    localStorage.setItem("reopenModal", JSON.stringify({ type: "view", projectId: id }));
     navigate(-1);
   };
 
   const handleSearch = () => {
     fetchData(1, pagination.pageSize, searchKeyword);
   };
-
 
   // ================== Columns ==================
   const columns = [
@@ -237,71 +191,61 @@ export default function DetailPage() {
         <Button type="link" onClick={() => navigate(`/detail/household/${record.id}`)}>
           Xem chi tiết
         </Button>
-      ),
-    },
+      )
+    }
   ];
-
-  // ===== DEBUG: Log để tracking =====
-  useEffect(() => {
-    console.log("=== HouseholdDetailPage State ===");
-    console.log("Selected Row Keys:", selectedRowKeys);
-    console.log("Redux selectedHouseholds:", selectedHouseholds);
-    console.log("Households length:", households.length);
-    console.log("Mode:", mode);
-    console.log("TempFormData:", localStorage.getItem("tempFormData"));
-  }, [selectedRowKeys, selectedHouseholds, households, mode]);
 
   return (
     <Card
       title={`Danh sách Hộ dân trong dự án (${mode === "view" ? "Xem" : mode === "add" ? "Thêm" : "Sửa"})`}
       style={{ margin: 24 }}
-      extra={
-        (mode === "add" || mode === "edit") && (
-          <div style={{ fontSize: "14px", color: "#666" }}>
-            Đã chọn: {selectedRowKeys.length} hộ dân
-          </div>
-        )
-      }
+      extra={(mode === "add" || mode === "edit") && (
+        <div style={{ fontSize: 14, color: "#666" }}>
+          Đã chọn: {tempSelectedRowKeys.length} hộ dân
+        </div>
+      )}
     >
       <Spin spinning={loading}>
         <Input
           placeholder="Tìm theo tên, mã hộ dân, SĐT"
           value={searchKeyword}
-          onChange={(e) => setSearchKeyword(e.target.value)}
-          onPressEnter={() => fetchData(1, pagination.pageSize, searchKeyword)}
+          onChange={e => setSearchKeyword(e.target.value)}
+          onPressEnter={handleSearch}
           style={{ width: 300, height: 40, marginBottom: 16 }}
         />
-
 
         <Table
           dataSource={households}
           rowKey="id"
           size="small"
-          rowSelection={
-            mode === "add" || mode === "edit"
-              ? {
-                selectedRowKeys,
-                onChange: setSelectedRowKeys,
-                type: "checkbox"
-              }
-              : undefined
-          }
+          rowSelection={(mode === "add" || mode === "edit") ? {
+            selectedRowKeys,
+            onChange: (newSelectedKeys) => {
+              setSelectedRowKeys(newSelectedKeys);
+
+              const mergedKeys = Array.from(new Set([
+                ...tempSelectedRowKeys.filter(k => !households.some(h => h.id === k)),
+                ...newSelectedKeys
+              ]));
+              setTempSelectedRowKeys(mergedKeys);
+            },
+            type: "checkbox",
+            preserveSelectedRowKeys: true
+          } : undefined}
           pagination={{
             current: pagination.page,
             pageSize: pagination.pageSize,
             total: pagination.total,
-            onChange: (page, pageSize) => fetchData(page, pageSize),
+            onChange: (page, pageSize) => fetchData(page, pageSize, searchKeyword)
           }}
           columns={columns}
         />
 
         {(mode === "add" || mode === "edit") && (
           <div style={{ marginTop: 16, textAlign: "right" }}>
-            <Button style={{ marginRight: 8 }} onClick={handleCancel}>
-              Hủy
-            </Button>
-            <Button type="primary" onClick={handleConfirm} disabled={!selectedRowKeys.length}>
-              {mode === "add" ? "Xác nhận chọn" : "Cập nhật"} ({selectedRowKeys.length} hộ dân)
+            <Button style={{ marginRight: 8 }} onClick={handleCancel}>Hủy</Button>
+            <Button type="primary" onClick={handleConfirm} disabled={!tempSelectedRowKeys.length}>
+              {mode === "add" ? "Xác nhận chọn" : "Cập nhật"} ({tempSelectedRowKeys.length} hộ dân)
             </Button>
           </div>
         )}

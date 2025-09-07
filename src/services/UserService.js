@@ -114,24 +114,19 @@ export const refreshToken = async (refreshToken) => {
   console.log("refreshToken", refreshToken);
   const res = await axios.post(
     `${process.env.REACT_APP_API_URL}/users/refresh-token`,
-    {},
-    {
-      headers: {
-        Authorization: `Bearer ${refreshToken}`,
-      },
-    }
+    { refreshToken } // 👈 Gửi trong body
   );
   return res.data;
 };
 
 export const logoutUser = async () => {
-  const res = await axios.post(`${process.env.REACT_APP_API_URL}/user/log-out`);
+  const res = await axios.post(`${process.env.REACT_APP_API_URL}/users/log-out`);
   return res.data;
 };
 
 export const updateUser = async (id, data, access_token) => {
   const res = await axiosJWT.put(
-    `${process.env.REACT_APP_API_URL}/user/update-user/${id}`,
+    `${process.env.REACT_APP_API_URL}/users/update-user/${id}`,
     data,
     {
       headers: {

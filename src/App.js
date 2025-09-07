@@ -225,7 +225,8 @@ function App() {
 
             {routes.map((route) => {
               if (route.children) {
-                const Layout = route.layout;
+                const Layout = route.layout || Fragment;
+
                 if (route.isPrivated) {
                   return (
                     <Route
@@ -240,9 +241,16 @@ function App() {
                       }
                     >
                       <Route element={<Layout />}>
-                        {route.children.map((child) => (
-                          <Route key={child.path} path={child.path} element={<child.page />} />
-                        ))}
+                        {route.children.map((child) => {
+                          const ChildPage = child.page;
+                          return (
+                            <Route
+                              key={child.path}
+                              path={child.path}
+                              element={<ChildPage />}
+                            />
+                          );
+                        })}
                       </Route>
                     </Route>
                   );
@@ -250,9 +258,16 @@ function App() {
 
                 return (
                   <Route path={route.path} element={<Layout />} key={route.path}>
-                    {route.children.map((child) => (
-                      <Route key={child.path} path={child.path} element={<child.page />} />
-                    ))}
+                    {route.children.map((child) => {
+                      const ChildPage = child.page;
+                      return (
+                        <Route
+                          key={child.path}
+                          path={child.path}
+                          element={<ChildPage />}
+                        />
+                      );
+                    })}
                   </Route>
                 );
               }
@@ -275,6 +290,7 @@ function App() {
 
             <Route path="/access-denied" element={<AccessDeniedPage />} />
           </Routes>
+
         </Router>
       </Loading>
     </div>

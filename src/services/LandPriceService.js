@@ -18,11 +18,15 @@ export async function getById(id, token) {
   return res.data;
 }
 
-export async function getAll(token) {
+export async function getAll(token, options = {}) {
+  const { page = 1, limit = 10, search = "" } = options;
+
   const res = await axios.get(`${API_URL}/get-all`, {
     headers: { Authorization: `Bearer ${token}` },
+    params: { page, limit, search },
   });
-  return res.data;
+
+  return res.data; 
 }
 
 export async function update(id, data, token) {

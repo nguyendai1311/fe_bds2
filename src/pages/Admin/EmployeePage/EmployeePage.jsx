@@ -20,6 +20,12 @@ export default function EmployeePage() {
 
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [isViewModalVisible, setIsViewModalVisible] = useState(false);
+  const [viewEmployee, setViewEmployee] = useState(null);
+
+  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editForm] = Form.useForm();
   const [form] = Form.useForm();
 
   const user = JSON.parse(localStorage.getItem("user"));
@@ -94,6 +100,50 @@ export default function EmployeePage() {
     }
   };
 
+  const handleView = async (record) => {
+    try {
+      const res = await UserService.getDetailsUser(record.key, user?.access_token);
+      setViewEmployee(res?.data || {});
+      setIsViewModalVisible(true);
+    } catch (err) {
+      console.error(err);
+      message.error("Không thể tải chi tiết nhân viên!");
+    }
+  };
+
+  // ====== Sửa nhân viên ======
+  const handleEdit = async (record) => {
+    try {
+      const res = await UserService.getDetailsUser(record.key, user?.access_token);
+      editForm.setFieldsValue({
+        name: res?.data?.name,
+        email: res?.data?.email,
+        roles: res?.data?.roles,
+      });
+      setCurrentEmployee({ key: record.key });
+      setIsEditModalVisible(true);
+    } catch (err) {
+      console.error(err);
+      message.error("Không thể tải dữ liệu để sửa!");
+    }
+  };
+
+  const handleUpdateEmployee = async () => {
+    try {
+      const values = await editForm.validateFields();
+      setEditing(true);
+      await UserService.updateUser(currentEmployee.key, values, user?.access_token);
+      message.success("Cập nhật nhân viên thành công!");
+      setIsEditModalVisible(false);
+      fetchEmployees(currentPage, searchName);
+    } catch (err) {
+      console.error(err);
+      message.error(err?.message || "Cập nhật nhân viên thất bại!");
+    } finally {
+      setEditing(false);
+    }
+  };
+
   const columns = [
     {
       title: "Avatar",
@@ -118,8 +168,8 @@ export default function EmployeePage() {
       key: "action",
       render: (_, record) => {
         const items = [
-          { key: "view", label: "Xem chi tiết", icon: <EyeOutlined />, onClick: () => console.log("Xem", record) },
-          { key: "edit", label: "Sửa", icon: <EditOutlined />, onClick: () => console.log("Sửa", record) },
+          { key: "view", label: "Xem chi tiết", icon: <EyeOutlined />, onClick: () => handleView(record) },
+          { key: "edit", label: "Sửa", icon: <EditOutlined />, onClick: () => handleEdit(record) },
           { key: "delete", label: "Xóa", icon: <DeleteOutlined />, onClick: () => handleDelete(record) },
         ];
         return (
@@ -213,6 +263,50 @@ export default function EmployeePage() {
           </Form.Item>
           <Form.Item label="Mật khẩu" name="password" rules={[{ required: true }]}>
             <Input.Password />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title="Thông tin nhân viên"
+        open={isViewModalVisible}
+        footer={null}
+        onCancel={() => setIsViewModalVisible(false)}
+      >
+        {viewEmployee ? (
+          <div>
+            <p><b>Tên:</b> {viewEmployee.name}</p>
+            <p><b>Email:</b> {viewEmployee.email}</p>
+            <p><b>Role:</b> {Array.isArray(viewEmployee.roles) ? viewEmployee.roles.join(", ") : viewEmployee.roles}</p>
+            <p><b>SĐT:</b> {viewEmployee.phone || "Chưa có"}</p>
+            <p><b>Địa chỉ:</b> {viewEmployee.full_address || "Chưa có"}</p>
+          </div>
+        ) : (
+          <Spin />
+        )}
+      </Modal>
+
+      {/* Modal Sửa */}
+      <Modal
+        title="Sửa nhân viên"
+        open={isEditModalVisible}
+        onOk={handleUpdateEmployee}
+        onCancel={() => setIsEditModalVisible(false)}
+        okText="Cập nhật"
+        cancelText="Hủy"
+        confirmLoading={editing}
+      >
+        <Form form={editForm} layout="vertical">
+          <Form.Item label="Tên nhân viên" name="name" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item label="Role" name="roles" rules={[{ required: true }]}>
+            <Select mode="multiple">
+              <Option value="employee">Employee</Option>
+              <Option value="admin">Admin</Option>
+            </Select>
+          </Form.Item>
+          <Form.Item label="Email" name="email" rules={[{ required: true, type: "email" }]}>
+            <Input disabled />
           </Form.Item>
         </Form>
       </Modal>
