@@ -110,13 +110,28 @@ export const getAllUser = async (access_token, { page = 1, limit = 10, search = 
   }
 };
 
+// Trong frontend service
 export const refreshToken = async (refreshToken) => {
-  console.log("refreshToken", refreshToken);
-  const res = await axios.post(
-    `${process.env.REACT_APP_API_URL}/users/refresh-token`,
-    { refreshToken } // 👈 Gửi trong body
-  );
-  return res.data;
+  try {
+    console.log("Sending refresh token:", refreshToken); // Debug log
+    
+    const res = await axios.post(
+      `${process.env.REACT_APP_API_URL}/users/refresh-token`,
+      { refresh_token: refreshToken },
+      { 
+        withCredentials: true,
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    
+    console.log("Refresh token response:", res.data);
+    return res.data;
+  } catch (err) {
+    console.error("Refresh token failed:", err.response?.data || err.message);
+    throw err;
+  }
 };
 
 export const logoutUser = async () => {

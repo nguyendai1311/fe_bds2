@@ -15,8 +15,8 @@ const queryClient = new QueryClient();
 root.render(
   <QueryClientProvider client={queryClient}>
     <Provider store={store}>
-      <App />
-      <ToastContainer position="bottom-right" theme="colored"/>
+        <App />
+      <ToastContainer position="bottom-right" theme="colored" />
     </Provider>
   </QueryClientProvider>
 );

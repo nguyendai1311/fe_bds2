@@ -37,7 +37,8 @@ import {
   CenteredAction,
 } from "./style";
 import { renderFileList } from "../../../utils/fileRender";
-import { parseDayjsToDate, toDayjsOrNull, normalizeDate } from "../../../utils/date";
+import { normalizeDate, toDayjsOrNull, safeProcessNestedObject, parseDayjsToDate } from "../../../utils/date"
+import dayjs from "dayjs";
 
 export default function CitizenPage() {
   const [citizens, setCitizens] = useState([]);
@@ -69,39 +70,37 @@ export default function CitizenPage() {
         search,
       });
 
-      // Nếu BE trả về { data: [...], lastDocId: "...", total: ... }
       const data = res?.data || [];
 
       const list = data.map((cit, index) => ({
         key: cit.id || index.toString(),
         id: cit.id,
-        maHoDan: cit.maHoDan || "",
-        hoTenChuSuDung: cit.hoTenChuSuDung || "",
-        soDienThoaiLienLac: cit.soDienThoaiLienLac || "",
-        diaChiThuongTru: cit.diaChiThuongTru || "",
-        diaChiGiaiToa: cit.diaChiGiaiToa || "",
-        soThua: cit.soThua || "",
-        soTo: cit.soTo || "",
+        household_id: cit.household_id || "",
+        owner_name: cit.owner_name || "",
+        contact_phone: cit.contact_phone || "",
+        permanent_address: cit.permanent_address || "",
+        clearance_address: cit.clearance_address || "",
+        land_plot_number: cit.land_plot_number || "",
+        map_sheet_number: cit.map_sheet_number || "",
         phuong: cit.phuong || "",
-        quan: cit.quan || "",
-        giaThuoc: cit.giaThuoc || "",
-        thongBaoThuHoiDat: cit.thongBaoThuHoiDat
-          ? { ...cit.thongBaoThuHoiDat, ngay: normalizeDate(cit.thongBaoThuHoiDat.ngay) }
+        district: cit.district || "",
+        land_withdrawal_notice_no: cit.land_withdrawal_notice_no
+          ? { ...cit.land_withdrawal_notice_no, ngay: normalizeDate(cit.land_withdrawal_notice_no.ngay) }
           : null,
-        quyetDinhPheDuyet: cit.quyetDinhPheDuyet
-          ? { ...cit.quyetDinhPheDuyet, ngay: normalizeDate(cit.quyetDinhPheDuyet.ngay) }
+        land_withdrawal_decision_no: cit.land_withdrawal_decision_no
+          ? { ...cit.land_withdrawal_decision_no, ngay: normalizeDate(cit.land_withdrawal_decision_no.ngay) }
           : null,
-        phuongAnBTHTTDC: cit.phuongAnBTHTTDC
-          ? { ...cit.phuongAnBTHTTDC, ngay: normalizeDate(cit.phuongAnBTHTTDC.ngay) }
+        compensation_plan_no: cit.compensation_plan_no
+          ? { ...cit.compensation_plan_no, ngay: normalizeDate(cit.compensation_plan_no.ngay) }
           : null,
-        nhanTienBoiThuongHoTro: cit.daNhanTienBoiThuong
-          ? { ...cit.daNhanTienBoiThuong, ngay: normalizeDate(cit.daNhanTienBoiThuong.ngay) }
+        compensation_received: cit.compensation_received
+          ? { ...cit.compensation_received, ngay: normalizeDate(cit.compensation_received.ngay) }
           : { xacNhan: false, ngay: null, dinhKem: [] },
-        banGiaoMatBang: cit.daBanGiaoMatBang
-          ? { ...cit.daBanGiaoMatBang, ngay: normalizeDate(cit.daBanGiaoMatBang.ngay) }
+        site_handover: cit.site_handover
+          ? { ...cit.site_handover, ngay: normalizeDate(cit.site_handover.ngay) }
           : { xacNhan: false, ngay: null, dinhKem: [] },
-        tongTien: cit.tongSoTienBoiThuongHoTro || "",
-        tongTienBangChu: cit.bangChu || "",
+        total_compensation_amount: cit.tongSoTienBoiThuongHoTro || "",
+        amount_in_words: cit.bangChu || "",
         createdAt: normalizeDate(cit.createdAt),
         updatedAt: normalizeDate(cit.updatedAt),
       }));
@@ -130,9 +129,9 @@ export default function CitizenPage() {
     const keyword = searchKeyword.toLowerCase();
     const results = citizens.filter(
       (c) =>
-        c.hoTenChuSuDung?.toLowerCase().includes(keyword) ||
-        c.maHoDan?.toLowerCase().includes(keyword) ||
-        c.soDienThoaiLienLac?.toLowerCase().includes(keyword)
+        c.owner_name?.toLowerCase().includes(keyword) ||
+        c.household_id?.toLowerCase().includes(keyword) ||
+        c.contact_phone?.toLowerCase().includes(keyword)
     );
     setFilteredCitizens(results);
   }, [searchKeyword, citizens]);
@@ -232,7 +231,7 @@ export default function CitizenPage() {
     }
     try {
       await CitizenService.remove(editingCitizen.key, user?.access_token);
-      message.success(`Đã xóa dân cư: ${editingCitizen.hoTenChuSuDung}`);
+      message.success(`Đã xóa dân cư: ${editingCitizen.owner_name}`);
 
       // Reload data sau khi xóa
       await fetchCitizens();
@@ -244,155 +243,200 @@ export default function CitizenPage() {
     }
   };
 
+  // ✅ Hàm Add + Edit citizen gộp chung
   const handleAddEditCitizen = async () => {
     try {
       const values = await form.validateFields();
       setSaving(true);
 
-      // Kiểm tra ID khi update
-      if (editingCitizen && !editingCitizen.id) {
-        message.error("ID citizen không hợp lệ để cập nhật!");
-        return;
-      }
-
+      // Helper upload files với error handling tốt hơn
       const processFiles = async (fileList, fieldName) => {
         if (!fileList || !Array.isArray(fileList)) return [];
 
         const uploadedFiles = [];
+        const uploadPromises = [];
 
         for (const f of fileList) {
           if (f.url) {
-            // File đã tồn tại - kiểm tra xem có phải object {path, name} không
-            if (typeof f.url === 'string') {
-              uploadedFiles.push(f.url);
-            } else {
-              uploadedFiles.push(f.url);
-            }
-
+            // File đã có sẵn trong DB - giữ nguyên
+            uploadedFiles.push(f.url);
           } else if (f.originFileObj) {
-            // ✅ File mới upload
-            try {
-              const formData = new FormData();
-              formData.append(fieldName, f.originFileObj);
-              const res = await uploadFile(formData, user?.access_token);
+            // File mới cần upload
+            const uploadPromise = (async () => {
+              try {
+                const formData = new FormData();
+                formData.append(fieldName, f.originFileObj);
+                const res = await uploadFile(formData, user?.access_token);
 
-              // ✅ Thay đổi cách lấy dữ liệu
-              if (res?.data) {
-                // Nếu backend trả về {path, name}
-                uploadedFiles.push(res.data);
-              } else if (res?.files?.[0]) {
-                // Nếu backend trả về file info khác
-                uploadedFiles.push(res.files[0]);
+                if (res?.data) {
+                  return res.data; // {path, name}
+                } else if (res?.files?.[0]) {
+                  return res.files[0];
+                } else {
+                  throw new Error(`Invalid upload response for ${f.name}`);
+                }
+              } catch (uploadError) {
+                console.error(`Upload error for ${f.name}:`, uploadError);
+                message.warning(`Không thể upload file ${f.name}: ${uploadError.message}`);
+                return null; // Trả về null để filter sau
               }
-            } catch (err) {
-              console.error("Error uploading file:", err);
-              message.warning(`Không thể upload file ${f.name}`);
-            }
+            })();
+            uploadPromises.push(uploadPromise);
           }
         }
+
+        // Chờ tất cả uploads hoàn thành
+        if (uploadPromises.length > 0) {
+          const uploadResults = await Promise.all(uploadPromises);
+          uploadedFiles.push(...uploadResults.filter(result => result !== null));
+        }
+
         return uploadedFiles;
       };
 
+      // Helper xử lý object có ngày + file với validation
+      const normalizeNestedObject = async (obj, fieldName, hasXacNhan = false) => {
+        if (!obj) {
+          return hasXacNhan
+            ? { xacNhan: false, ngay: null, dinhKem: [] }
+            : null; // giữ null thay vì tự tạo object rỗng
+        }
 
+
+        // Validate required fields
+        if (!hasXacNhan && !obj.so) {
+          console.warn(`Warning: ${fieldName} missing 'so' field`);
+        }
+
+        const result = {
+          ...(hasXacNhan
+            ? { xacNhan: Boolean(obj.xacNhan) }
+            : { so: obj.so || "" }),
+          ngay: obj.ngay ? parseDayjsToDate(obj.ngay) : null,
+          dinhKem: await processFiles(obj.dinhKem, fieldName),
+        };
+
+        console.log(`Processed ${fieldName}:`, result);
+        return result;
+      };
+
+      // Validate form data trước khi process
+      const requiredFields = ['household_id', 'owner_name'];
+      for (const field of requiredFields) {
+        if (!values[field]) {
+          message.error(`Trường ${field} là bắt buộc`);
+          return;
+        }
+      }
+
+      // Chuẩn hóa dữ liệu để gửi API
+      console.log('Processing form values:', values);
 
       const normalizedValues = {
         ...values,
-        thongBaoThuHoiDat: values.thongBaoThuHoiDat
-          ? {
-            so: values.thongBaoThuHoiDat.so || "",
-            ngay: parseDayjsToDate(values.thongBaoThuHoiDat.ngay),
-            dinhKem: await processFiles(
-              values.thongBaoThuHoiDat.dinhKem,
-              "thongBaoThuHoiDat"
-            ),
-          }
-          : null,
-
-        quyetDinhPheDuyet: values.quyetDinhPheDuyet
-          ? {
-            so: values.quyetDinhPheDuyet.so || "",
-            ngay: parseDayjsToDate(values.quyetDinhPheDuyet.ngay),
-            dinhKem: await processFiles(
-              values.quyetDinhPheDuyet.dinhKem,
-              "quyetDinhPheDuyet"
-            ),
-          }
-          : null,
-
-        phuongAnBTHTTDC: values.phuongAnBTHTTDC
-          ? {
-            so: values.phuongAnBTHTTDC.so || "",
-            ngay: parseDayjsToDate(values.phuongAnBTHTTDC.ngay),
-            dinhKem: await processFiles(
-              values.phuongAnBTHTTDC.dinhKem,
-              "phuongAnBTHTTDC"
-            ),
-          }
-          : null,
-
-        nhanTienBoiThuongHoTro: values.nhanTienBoiThuongHoTro
-          ? {
-            xacNhan: values.nhanTienBoiThuongHoTro.xacNhan || false,
-            ngay: parseDayjsToDate(values.nhanTienBoiThuongHoTro.ngay),
-            dinhKem: await processFiles(
-              values.nhanTienBoiThuongHoTro.dinhKem,
-              "nhanTienBoiThuongHoTro"
-            ),
-          }
-          : { xacNhan: false, ngay: null, dinhKem: [] },
-
-        banGiaoMatBang: values.banGiaoMatBang
-          ? {
-            xacNhan: values.banGiaoMatBang.xacNhan || false,
-            ngay: parseDayjsToDate(values.banGiaoMatBang.ngay),
-            dinhKem: await processFiles(
-              values.banGiaoMatBang.dinhKem,
-              "banGiaoMatBang"
-            ),
-          }
-          : { xacNhan: false, ngay: null, dinhKem: [] },
+        land_withdrawal_notice_no: await normalizeNestedObject(
+          values.land_withdrawal_notice_no,
+          "land_withdrawal_notice_no"
+        ),
+        land_withdrawal_decision_no: await normalizeNestedObject(
+          values.land_withdrawal_decision_no,
+          "land_withdrawal_decision_no"
+        ),
+        compensation_plan_no: await normalizeNestedObject(
+          values.compensation_plan_no,
+          "compensation_plan_no"
+        ),
+        compensation_received: await normalizeNestedObject(
+          values.compensation_received,
+          "compensation_received",
+          true
+        ),
+        site_handover: await normalizeNestedObject(
+          values.site_handover,
+          "site_handover",
+          true
+        ),
       };
 
+      console.log('Normalized values:', normalizedValues);
+
       let savedCitizen;
+
       if (editingCitizen) {
-        // Update
+        // Update existing citizen
+        if (!editingCitizen.id) {
+          message.error("ID citizen không hợp lệ để cập nhật!");
+          return;
+        }
+
         const payload = {
           ...normalizedValues,
           id: editingCitizen.id,
           updatedAt: new Date().toISOString(),
         };
 
-        console.log("Updating citizen with ID:", editingCitizen.id);
-        savedCitizen = await CitizenService.update(
-          editingCitizen.id,
-          payload,
-          user?.access_token
-        );
-        message.success("Cập nhật dân cư thành công!");
+        console.log("Updating citizen with payload:", payload);
+
+        try {
+          savedCitizen = await CitizenService.update(
+            editingCitizen.id,
+            payload,
+            user?.access_token
+          );
+          message.success("Cập nhật dân cư thành công!");
+        } catch (updateError) {
+          console.error("Update API error:", updateError);
+          throw new Error(`Cập nhật thất bại: ${updateError.message || updateError}`);
+        }
       } else {
-        // Create
-        savedCitizen = await CitizenService.create(
-          normalizedValues,
-          user?.access_token
-        );
-        message.success("Thêm dân cư thành công!");
+        // Create new citizen
+        console.log("Creating new citizen with data:", normalizedValues);
+
+        try {
+          savedCitizen = await CitizenService.create(
+            normalizedValues,
+            user?.access_token
+          );
+          message.success("Thêm dân cư thành công!");
+        } catch (createError) {
+          console.error("Create API error:", createError);
+          throw new Error(`Tạo mới thất bại: ${createError.message || createError}`);
+        }
       }
+
+      console.log("Saved citizen response:", savedCitizen);
 
       // Reset form và đóng modal
       form.resetFields();
       setEditingCitizen(null);
       setIsAddEditModalVisible(false);
 
-      // Reload data sau khi thêm/sửa
-      await fetchCitizens();
+      // Reload data với current page
+      await fetchCitizens({
+        page: currentPage,
+        limit: pageSize,
+        search: searchKeyword
+      });
 
-    } catch (err) {
-      console.error("Error saving citizen:", err);
-      message.error(err?.message || "Lưu thất bại!");
+    } catch (validationError) {
+      // Form validation errors
+      if (validationError.errorFields) {
+        console.error("Form validation errors:", validationError.errorFields);
+        message.error("Vui lòng kiểm tra lại thông tin nhập vào");
+        return;
+      }
+
+      // API or processing errors
+      console.error("Error in handleAddEditCitizen:", validationError);
+      const errorMessage = validationError?.message ||
+        validationError?.response?.data?.message ||
+        "Đã xảy ra lỗi không xác định";
+      message.error(errorMessage);
     } finally {
       setSaving(false);
     }
   };
+
 
   // Hàm xem chi tiết
   const handleViewCitizen = async (record) => {
@@ -406,34 +450,34 @@ export default function CitizenPage() {
           key: citizenData.id,
           id: citizenData.id,
           ...citizenData,
-          thongBaoThuHoiDat: citizenData.thongBaoThuHoiDat
+          land_withdrawal_notice_no: citizenData.land_withdrawal_notice_no
             ? {
-              ...citizenData.thongBaoThuHoiDat,
-              ngay: normalizeDate(citizenData.thongBaoThuHoiDat.ngay),
+              ...citizenData.land_withdrawal_notice_no,
+              ngay: normalizeDate(citizenData.land_withdrawal_notice_no.ngay),
             }
             : null,
-          quyetDinhPheDuyet: citizenData.quyetDinhPheDuyet
+          land_withdrawal_decision_no: citizenData.land_withdrawal_decision_no
             ? {
-              ...citizenData.quyetDinhPheDuyet,
-              ngay: normalizeDate(citizenData.quyetDinhPheDuyet.ngay),
+              ...citizenData.land_withdrawal_decision_no,
+              ngay: normalizeDate(citizenData.land_withdrawal_decision_no.ngay),
             }
             : null,
-          phuongAnBTHTTDC: citizenData.phuongAnBTHTTDC
+          compensation_plan_no: citizenData.compensation_plan_no
             ? {
-              ...citizenData.phuongAnBTHTTDC,
-              ngay: normalizeDate(citizenData.phuongAnBTHTTDC.ngay),
+              ...citizenData.compensation_plan_no,
+              ngay: normalizeDate(citizenData.compensation_plan_no.ngay),
             }
             : null,
-          nhanTienBoiThuongHoTro: citizenData.nhanTienBoiThuongHoTro
+          compensation_received: citizenData.compensation_received
             ? {
-              ...citizenData.nhanTienBoiThuongHoTro,
-              ngay: normalizeDate(citizenData.nhanTienBoiThuongHoTro.ngay),
+              ...citizenData.compensation_received,
+              ngay: normalizeDate(citizenData.compensation_received.ngay),
             }
             : { xacNhan: false, ngay: null, dinhKem: [] },
-          banGiaoMatBang: citizenData.banGiaoMatBang
+          site_handover: citizenData.site_handover
             ? {
-              ...citizenData.banGiaoMatBang,
-              ngay: normalizeDate(citizenData.banGiaoMatBang.ngay),
+              ...citizenData.site_handover,
+              ngay: normalizeDate(citizenData.site_handover.ngay),
             }
             : { xacNhan: false, ngay: null, dinhKem: [] },
         };
@@ -449,78 +493,92 @@ export default function CitizenPage() {
     }
   };
 
-  // Hàm edit citizen
+  // Hàm edit citizen - Enhanced version with better null handling
   const handleEditCitizen = async (record) => {
     try {
       setLoading(true);
       const res = await CitizenService.getById(record.key, user?.access_token);
       const citizenData = res?.data;
 
+      console.log("📊 Raw citizen data from API:", citizenData);
+
       if (citizenData) {
-        const converted = {
-          ...citizenData,
-          thongBaoThuHoiDat: citizenData.thongBaoThuHoiDat
-            ? {
-              ...citizenData.thongBaoThuHoiDat,
-              ngay: toDayjsOrNull(citizenData.thongBaoThuHoiDat.ngay),
-              dinhKem: convertFileList(citizenData.thongBaoThuHoiDat.dinhKem),
-            }
-            : null,
-          quyetDinhPheDuyet: citizenData.quyetDinhPheDuyet
-            ? {
-              ...citizenData.quyetDinhPheDuyet,
-              ngay: toDayjsOrNull(citizenData.quyetDinhPheDuyet.ngay),
-              dinhKem: convertFileList(citizenData.quyetDinhPheDuyet.dinhKem),
-            }
-            : null,
-          phuongAnBTHTTDC: citizenData.phuongAnBTHTTDC
-            ? {
-              ...citizenData.phuongAnBTHTTDC,
-              ngay: toDayjsOrNull(citizenData.phuongAnBTHTTDC.ngay),
-              dinhKem: convertFileList(citizenData.phuongAnBTHTTDC.dinhKem),
-            }
-            : null,
-          nhanTienBoiThuongHoTro: citizenData.nhanTienBoiThuongHoTro
-            ? {
-              xacNhan: citizenData.nhanTienBoiThuongHoTro.xacNhan || false,
-              ngay: toDayjsOrNull(citizenData.nhanTienBoiThuongHoTro.ngay),
-              dinhKem: convertFileList(citizenData.nhanTienBoiThuongHoTro.dinhKem),
-            }
-            : { xacNhan: false, ngay: null, dinhKem: [] },
-          banGiaoMatBang: citizenData.banGiaoMatBang
-            ? {
-              xacNhan: citizenData.banGiaoMatBang.xacNhan || false,
-              ngay: toDayjsOrNull(citizenData.banGiaoMatBang.ngay),
-              dinhKem: convertFileList(citizenData.banGiaoMatBang.dinhKem),
-            }
-            : { xacNhan: false, ngay: null, dinhKem: [] },
-          tongTien: citizenData.tongTien ? Number(citizenData.tongTien) : undefined,
-          tongTienBangChu: citizenData.tongTienBangChu || "",
+        // Helper function xử lý nested object an toàn
+        const safeProcessNestedObject = (obj, fieldName, hasXacNhan = false) => {
+          console.log(`🔍 Processing ${fieldName}:`, obj);
+
+          if (!obj || obj === null) {
+            console.log(`⚠️ ${fieldName} is null/undefined, returning default`);
+            return hasXacNhan
+              ? { xacNhan: false, ngay: null, dinhKem: [] }
+              : { so: "", ngay: null, dinhKem: [] };
+          }
+
+          return {
+            ...(hasXacNhan ? { xacNhan: Boolean(obj.xacNhan) } : { so: obj.so || "" }),
+            ngay: toDayjsOrNull(obj.ngay), // ✅ convert 1 lần duy nhất
+            dinhKem: convertFileList(obj.dinhKem) || [],
+          };
         };
 
-        // Set citizen với đầy đủ thông tin bao gồm id
+        const converted = {
+          ...citizenData,
+          land_withdrawal_notice_no: safeProcessNestedObject(
+            citizenData.land_withdrawal_notice_no,
+            "land_withdrawal_notice_no"
+          ),
+          land_withdrawal_decision_no: safeProcessNestedObject(
+            citizenData.land_withdrawal_decision_no,
+            "land_withdrawal_decision_no"
+          ),
+          compensation_plan_no: safeProcessNestedObject(
+            citizenData.compensation_plan_no,
+            "compensation_plan_no"
+          ),
+          compensation_received: safeProcessNestedObject(
+            citizenData.compensation_received,
+            "compensation_received",
+            true
+          ),
+          site_handover: safeProcessNestedObject(
+            citizenData.site_handover,
+            "site_handover",
+            true
+          ),
+          total_compensation_amount: citizenData.total_compensation_amount
+            ? Number(citizenData.total_compensation_amount)
+            : undefined,
+          amount_in_words: citizenData.amount_in_words || "",
+        };
+
+        console.log("✅ Final converted data:", converted);
+
+        // Lưu editingCitizen để biết đang edit record nào
         setEditingCitizen({
           ...citizenData,
           key: citizenData.id,
-          id: citizenData.id
+          id: citizenData.id,
         });
 
+        // ✅ set luôn converted vào form, đã chuẩn hóa toàn bộ
         form.setFieldsValue(converted);
+
         setIsAddEditModalVisible(true);
       }
     } catch (err) {
-      console.error("Error loading citizen for edit:", err);
+      console.error("❌ Error loading citizen for edit:", err);
       message.error("Không thể tải dữ liệu để sửa");
     } finally {
       setLoading(false);
     }
   };
 
+
   const columns = [
-    { title: "Mã hộ dân", dataIndex: "maHoDan" },
-    { title: "Họ tên", dataIndex: "hoTenChuSuDung" },
-    { title: "SĐT", dataIndex: "soDienThoaiLienLac" },
-    { title: "Địa chỉ", dataIndex: "diaChiThuongTru" },
+    { title: "Mã hộ dân", dataIndex: "household_id" },
+    { title: "Họ tên", dataIndex: "owner_name" },
+    { title: "SĐT", dataIndex: "contact_phone" },
+    { title: "Địa chỉ", dataIndex: "permanent_address" },
     {
       title: "Hành động",
       key: "action",
@@ -637,7 +695,7 @@ export default function CitizenPage() {
         cancelText="Hủy"
         okButtonProps={{ danger: true }}
       >
-        <p>Bạn có chắc chắn muốn xóa hộ dân <strong>{editingCitizen?.hoTenChuSuDung}</strong>?</p>
+        <p>Bạn có chắc chắn muốn xóa hộ dân <strong>{editingCitizen?.owner_name}</strong>?</p>
       </Modal>
 
       {/* Modal thêm/sửa */}
@@ -661,11 +719,11 @@ export default function CitizenPage() {
 
           {/* --- Thông tin cơ bản --- */}
           {[
-            { label: "Mã hộ dân", name: "maHoDan" },
-            { label: "Họ và tên chủ sử dụng", name: "hoTenChuSuDung" },
-            { label: "Địa chỉ thường trú", name: "diaChiThuongTru" },
-            { label: "Số điện thoại liên lạc", name: "soDienThoaiLienLac" },
-            { label: "Địa chỉ giải tỏa", name: "diaChiGiaiToa" },
+            { label: "Mã hộ dân", name: "household_id" },
+            { label: "Họ và tên chủ sử dụng", name: "owner_name" },
+            { label: "Địa chỉ thường trú", name: "permanent_address" },
+            { label: "Số điện thoại liên lạc", name: "contact_phone" },
+            { label: "Địa chỉ giải tỏa", name: "clearance_address" },
           ].map((field) => (
             <Row gutter={16} key={field.name} style={{ marginBottom: 16 }} align="middle">
               <Col span={4}>
@@ -682,19 +740,19 @@ export default function CitizenPage() {
           {/* --- Số thửa, tờ theo BĐĐC 2002 --- */}
           <Row gutter={16} align="middle" style={{ marginBottom: 16 }}>
             <Col span={4}><label>Số thửa, tờ theo BĐĐC 2002:</label></Col>
-            <Col span={4}><Form.Item name="soThua"><Input placeholder="Số thửa" /></Form.Item></Col>
-            <Col span={4}><Form.Item name="soTo"><Input placeholder="Số tờ" /></Form.Item></Col>
+            <Col span={4}><Form.Item name="land_plot_number"><Input placeholder="Số thửa" /></Form.Item></Col>
+            <Col span={4}><Form.Item name="map_sheet_number"><Input placeholder="Số tờ" /></Form.Item></Col>
             <Col span={6}><Form.Item name="phuong"><Input placeholder="Phường" /></Form.Item></Col>
-            <Col span={6}><Form.Item name="quan"><Input placeholder="Quận" /></Form.Item></Col>
+            <Col span={6}><Form.Item name="district"><Input placeholder="Quận" /></Form.Item></Col>
           </Row>
 
           {/* --- Các object nested --- */}
           {[
-            { label: "Thông báo thu hồi đất", name: "thongBaoThuHoiDat" },
-            { label: "Quyết định phê duyệt", name: "quyetDinhPheDuyet" },
-            { label: "Phương án BT, HT, TĐC", name: "phuongAnBTHTTDC" },
-            { label: "Đã nhận tiền bồi thường, hỗ trợ", name: "nhanTienBoiThuongHoTro", isCheckbox: true },
-            { label: "Đã bàn giao mặt bằng", name: "banGiaoMatBang", isCheckbox: true },
+            { label: "Thông báo thu hồi đất", name: "land_withdrawal_notice_no" },
+            { label: "Quyết định phê duyệt", name: "land_withdrawal_decision_no" },
+            { label: "Phương án BT, HT, TĐC", name: "compensation_plan_no" },
+            { label: "Đã nhận tiền bồi thường, hỗ trợ", name: "compensation_received", isCheckbox: true },
+            { label: "Đã bàn giao mặt bằng", name: "site_handover", isCheckbox: true },
           ].map((field) => (
             <Row gutter={16} align="middle" style={{ marginBottom: 16 }} key={field.name}>
               <Col span={4}><label>{field.label}:</label></Col>
@@ -744,7 +802,7 @@ export default function CitizenPage() {
           <Row gutter={16} align="middle" style={{ marginBottom: 16 }}>
             <Col span={4}><label>Tổng số tiền bồi thường hỗ trợ:</label></Col>
             <Col span={6}>
-              <Form.Item name="tongTien">
+              <Form.Item name="total_compensation_amount">
                 <InputNumber
                   style={{ width: "100%" }}
                   formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
@@ -756,7 +814,7 @@ export default function CitizenPage() {
               </Form.Item>
             </Col>
             <Col span={14}>
-              <Form.Item name="tongTienBangChu">
+              <Form.Item name="amount_in_words">
                 <Input placeholder="Bằng chữ" />
               </Form.Item>
             </Col>
@@ -788,10 +846,10 @@ export default function CitizenPage() {
             <Divider orientation="left">Thông tin cơ bản</Divider>
 
             {[
-              { label: "Mã hộ dân", value: viewingCitizen.maHoDan },
-              { label: "Họ tên", value: viewingCitizen.hoTenChuSuDung },
-              { label: "SĐT", value: viewingCitizen.soDienThoaiLienLac },
-              { label: "Địa chỉ", value: viewingCitizen.diaChiThuongTru },
+              { label: "Mã hộ dân", value: viewingCitizen.household_id },
+              { label: "Họ tên", value: viewingCitizen.owner_name },
+              { label: "SĐT", value: viewingCitizen.contact_phone },
+              { label: "Địa chỉ", value: viewingCitizen.permanent_address },
             ].map((field, index) => (
               <Row key={index} style={{ marginBottom: 12 }} align="middle">
                 <Col span={4}>
@@ -807,26 +865,23 @@ export default function CitizenPage() {
             <Divider orientation="left">Thông tin đất đai</Divider>
             <Row style={{ marginBottom: 12 }} align="middle">
               <Col span={4}><label style={{ fontWeight: 500 }}>Số thửa, tờ theo BĐĐC 2002:</label></Col>
-              <Col span={4}><span><b>Số thửa:</b> {viewingCitizen.soThua || "N/A"}</span></Col>
-              <Col span={4}><span><b>Số tờ:</b> {viewingCitizen.soTo || "N/A"}</span></Col>
+              <Col span={4}><span><b>Số thửa:</b> {viewingCitizen.land_plot_number || "N/A"}</span></Col>
+              <Col span={4}><span><b>Số tờ:</b> {viewingCitizen.map_sheet_number || "N/A"}</span></Col>
               <Col span={6}><span><b>Phường:</b> {viewingCitizen.phuong || "N/A"}</span></Col>
-              <Col span={6}><span><b>Quận:</b> {viewingCitizen.quan || "N/A"}</span></Col>
+              <Col span={6}><span><b>Quận:</b> {viewingCitizen.district || "N/A"}</span></Col>
             </Row>
-            <Row style={{ marginBottom: 12 }}>
-              <Col span={4}><label style={{ fontWeight: 500 }}>Giá thuộc:</label></Col>
-              <Col span={20}><span>{viewingCitizen.giaThuoc || "Chưa có thông tin"}</span></Col>
-            </Row>
+
 
             {/* --- Thông báo thu hồi đất --- */}
             <Divider orientation="left">Thông báo thu hồi đất</Divider>
             <Row gutter={16} style={{ marginBottom: 12 }}>
               <Col span={4}><label style={{ fontWeight: 500 }}>Thông báo thu hồi đất:</label></Col>
-              <Col span={4}><span><b>Số:</b> {viewingCitizen?.thongBaoThuHoiDat?.so || "N/A"}</span></Col>
+              <Col span={4}><span><b>Số:</b> {viewingCitizen?.land_withdrawal_notice_no?.so || "N/A"}</span></Col>
               <Col span={8}>
-                <span><b>Ngày:</b> {viewingCitizen?.thongBaoThuHoiDat?.ngay || "N/A"}</span>
+                <span><b>Ngày:</b> {viewingCitizen?.land_withdrawal_notice_no?.ngay || "N/A"}</span>
               </Col>
               <Col span={8}>
-                {renderAttachment(viewingCitizen?.thongBaoThuHoiDat?.dinhKem)}
+                {renderAttachment(viewingCitizen?.land_withdrawal_notice_no?.dinhKem)}
               </Col>
 
             </Row>
@@ -835,12 +890,12 @@ export default function CitizenPage() {
             <Divider orientation="left">Quyết định phê duyệt</Divider>
             <Row gutter={16} style={{ marginBottom: 12 }}>
               <Col span={4}><label style={{ fontWeight: 500 }}>Quyết định phê duyệt:</label></Col>
-              <Col span={4}><span><b>Số:</b> {viewingCitizen?.quyetDinhPheDuyet?.so || "N/A"}</span></Col>
+              <Col span={4}><span><b>Số:</b> {viewingCitizen?.land_withdrawal_decision_no?.so || "N/A"}</span></Col>
               <Col span={8}>
-                <span><b>Ngày:</b> {viewingCitizen?.quyetDinhPheDuyet?.ngay || "N/A"}</span>
+                <span><b>Ngày:</b> {viewingCitizen?.land_withdrawal_decision_no?.ngay || "N/A"}</span>
               </Col>
               <Col span={8}>
-                {renderAttachment(viewingCitizen?.quyetDinhPheDuyet?.dinhKem)}
+                {renderAttachment(viewingCitizen?.land_withdrawal_decision_no?.dinhKem)}
               </Col>
             </Row>
 
@@ -848,27 +903,27 @@ export default function CitizenPage() {
             <Divider orientation="left">Phương án BT, HT, TĐC</Divider>
             <Row gutter={16} style={{ marginBottom: 12 }}>
               <Col span={4}><label style={{ fontWeight: 500 }}>Phương án BT, HT, TĐC:</label></Col>
-              <Col span={4}><span><b>Số:</b> {viewingCitizen?.phuongAnBTHTTDC?.so || "N/A"}</span></Col>
+              <Col span={4}><span><b>Số:</b> {viewingCitizen?.compensation_plan_no?.so || "N/A"}</span></Col>
               <Col span={8}>
-                <span><b>Ngày:</b> {viewingCitizen?.phuongAnBTHTTDC?.ngay || "N/A"}</span>
+                <span><b>Ngày:</b> {viewingCitizen?.compensation_plan_no?.ngay || "N/A"}</span>
               </Col>
               <Col span={8}>
-                {renderAttachment(viewingCitizen?.phuongAnBTHTTDC?.dinhKem)}
+                {renderAttachment(viewingCitizen?.compensation_plan_no?.dinhKem)}
               </Col>
             </Row>
 
             {/* --- Thông tin bồi thường --- */}
-            {(viewingCitizen.tongTien || viewingCitizen.tongTienBangChu) && (
+            {(viewingCitizen.total_compensation_amount || viewingCitizen.amount_in_words) && (
               <>
                 <Divider orientation="left">Thông tin bồi thường</Divider>
                 <Row style={{ marginBottom: 12 }}>
                   <Col span={4}><label style={{ fontWeight: 500 }}>Tổng số tiền:</label></Col>
                   <Col span={10}>
                     <span>
-                      {viewingCitizen.tongTien ? `${viewingCitizen.tongTien}`.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + " đồng" : "0 đồng"}
+                      {viewingCitizen.total_compensation_amount ? `${viewingCitizen.total_compensation_amount}`.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + " đồng" : "0 đồng"}
                     </span>
                   </Col>
-                  <Col span={10}><span><b>Bằng chữ:</b> {viewingCitizen.tongTienBangChu || "Chưa có"}</span></Col>
+                  <Col span={10}><span><b>Bằng chữ:</b> {viewingCitizen.amount_in_words || "Chưa có"}</span></Col>
                 </Row>
               </>
             )}
@@ -876,8 +931,8 @@ export default function CitizenPage() {
             {/* --- Trạng thái thực hiện --- */}
             <Divider orientation="left">Trạng thái thực hiện</Divider>
             {[
-              { label: "Đã nhận tiền bồi thường, hỗ trợ", data: viewingCitizen?.nhanTienBoiThuongHoTro },
-              { label: "Đã bàn giao mặt bằng", data: viewingCitizen?.banGiaoMatBang }
+              { label: "Đã nhận tiền bồi thường, hỗ trợ", data: viewingCitizen?.compensation_received },
+              { label: "Đã bàn giao mặt bằng", data: viewingCitizen?.site_handover }
             ].map((status, index) => (
               <Row key={index} gutter={16} style={{ marginBottom: 12 }}>
                 <Col span={4}><label style={{ fontWeight: 500 }}>{status.label}:</label></Col>
