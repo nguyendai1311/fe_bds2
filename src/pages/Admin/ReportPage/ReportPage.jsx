@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Card, Select, InputNumber, message } from "antd";
+import { Card, Select, InputNumber } from "antd";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   LineChart, Line,
@@ -21,45 +21,56 @@ export default function ReportPage() {
   const [dailyData, setDailyData] = useState([]);
   const [categoryData, setCategoryData] = useState([]);
 
-  // ===== Fetch dữ liệu năm =====
-  const fetchCompletedYear = async (year) => {
+  // ===== Fetch dữ liệu năm (group theo tháng) =====
+  const fetchByYear = async (year) => {
     try {
-      const res = await StatisficService.getCompletedByYear(year);
-      if (res.success) {
-        const data = res.data.map(item => ({
-          month: `T${item.month}`,
-          count: item.count,
+      const res = await StatisficService.getStatusHouseHoldByYear(year);
+      if (res.status === "success") {
+        const data = Object.entries(res.data).map(([month, val]) => ({
+          month: `T${month}`,
+          count: val.completed, // chỉ lấy số completed
         }));
         setMonthlyData(data);
       }
     } catch (err) {
-      console.error("Lỗi fetch completed by year:", err);
+      console.error("Lỗi fetch by year:", err);
     }
   };
 
-  // ===== Fetch dữ liệu tháng =====
-  const fetchCompletedMonth = async (year, month) => {
+  // ===== Fetch dữ liệu tháng (pie + daily chart) =====
+  const fetchByMonth = async (year, month) => {
     try {
-      const res = await StatisficService.getCompletedByMonth(year, month);
-      if (res.success) {
-        const data = res.data.map((item, i) => ({
-          day: `Ngày ${item.day}`, // giả sử API trả `day` hoặc `date`
-          count: item.count,
+      // Pie chart (status trong tháng)
+      const resMonth = await StatisficService.getStatusHouseHoldByYear(year, month);
+      if (resMonth.status === "success") {
+        const { data } = resMonth;
+        setCategoryData([
+          { name: "Chưa thực hiện", value: data.draft },
+          { name: "Đang làm", value: data.in_progress },
+          { name: "Hoàn thành", value: data.completed },
+        ]);
+      }
+
+      // Daily chart (completed theo ngày trong tháng)
+      const resDay = await StatisficService.getStatusHouseHoldByDay(year, month);
+      if (resDay.status === "success") {
+        const data = Object.entries(resDay.data).map(([day, val]) => ({
+          day: `Ngày ${day}`,
+          count: val.completed, // chỉ lấy completed
         }));
         setDailyData(data);
       }
     } catch (err) {
-      console.error("Lỗi fetch completed by month:", err);
+      console.error("Lỗi fetch by month:", err);
     }
   };
 
-
   useEffect(() => {
-    fetchCompletedYear(selectedYear);
+    fetchByYear(selectedYear);
   }, [selectedYear]);
 
   useEffect(() => {
-    fetchCompletedMonth(selectedYear, selectedMonth);
+    fetchByMonth(selectedYear, selectedMonth);
   }, [selectedYear, selectedMonth]);
 
   return (
@@ -156,6 +167,7 @@ export default function ReportPage() {
     </div>
   );
 }
+
 
 
 // import { useState, useEffect } from "react";

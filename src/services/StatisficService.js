@@ -2,18 +2,33 @@ import axios from "axios";
 
 const API_URL = `${process.env.REACT_APP_API_URL}/households`;
 
-// GET theo năm
-export const getCompletedByYear = async (year) => {
-  const res = await axios.get(`${API_URL}/completed-by-year`, {
-    params: { year },
-  });
-  return res.data; 
+export const getStatusHouseHold = async () => {
+  try {
+    const res = await axios.get(`${API_URL}/get-status`);
+    return res.data;
+  } catch (err) {
+    console.error("Lỗi getStatusHouseHold:", err);
+    throw err;
+  }
 };
 
-// GET theo tháng
-export const getCompletedByMonth = async (year, month) => {
-  const res = await axios.get(`${API_URL}/completed-by-month`, {
-    params: { year, month },
-  });
-  return res.data; 
+export const getStatusHouseHoldByDay = async (year, month) => {
+  const url = `${API_URL}/get-status-by-day?year=${year}&month=${month}`;
+  const res = await axios.get(url);
+  return res.data;
+};
+
+
+export const getStatusHouseHoldByYear = async (year, month) => {
+  try {
+    let url = `${API_URL}/get-status-by-year?year=${year}`;
+    if (month) {
+      url += `&month=${month}`;
+    }
+    const res = await axios.get(url);
+    return res.data;
+  } catch (err) {
+    console.error("Lỗi getStatusHouseHoldByYear:", err);
+    throw err;
+  }
 };

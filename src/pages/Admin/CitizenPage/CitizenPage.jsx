@@ -9,13 +9,13 @@ import {
   Input,
   Modal,
   message,
-  Tooltip,
   Spin,
   Table,
   Divider,
   Checkbox,
   InputNumber,
   Dropdown,
+  Select,
 } from "antd";
 import {
   DeleteOutlined,
@@ -23,22 +23,22 @@ import {
   EditOutlined,
   EyeOutlined,
   UploadOutlined,
-  DownOutlined,
-  MoreOutlined,
+  FileExcelOutlined,
 } from "@ant-design/icons";
 import * as CitizenService from "../../../services/CitizenService";
 import { uploadFile } from "../../../services/FileService";
 import { FiMoreVertical } from "react-icons/fi"; // hoặc FiMoreHorizontal
+import { mapToViewSections } from "../../../utils/viewHelper"
 
 import {
-  PageHeader,
   FilterContainer,
   HeaderActions,
-  CenteredAction,
 } from "./style";
-import { renderFileList } from "../../../utils/fileRender";
-import { normalizeDate, toDayjsOrNull, safeProcessNestedObject, parseDayjsToDate } from "../../../utils/date"
-import dayjs from "dayjs";
+import { normalizeDate, toDayjsOrNull, parseDayjsToDate } from "../../../utils/date"
+import { exportToExcel } from "../../../utils/exportExcel";
+import ConfirmDeleteModal from "../../../components/ModalComponent/ConfirmDeleteModal";
+import EditModal from "../../../components/ModalComponent/EditModal";
+import ViewModal from "../../../components/ModalComponent/ViewModal";
 
 export default function CitizenPage() {
   const [citizens, setCitizens] = useState([]);
@@ -59,6 +59,32 @@ export default function CitizenPage() {
 
   const [form] = Form.useForm();
   const user = JSON.parse(localStorage.getItem("user"));
+
+  async function handleExport({ page = 1, limit = 8, search = "" } = {}) {
+    const res = await CitizenService.getAll(user?.access_token, {
+      page,
+      limit,
+      search,
+    });
+
+    const rows = res.data;
+
+    exportToExcel(rows, "households.xlsx", {
+      household_id: "Mã hộ",
+      owner_name: "Chủ hộ",
+      permanent_address: "Địa chỉ thường trú",
+      contact_phone: "SĐT",
+      district: "Quận",
+      phuong: "Phường",
+      land_plot_number: "Số thửa",
+      map_sheet_number: "Tờ bản đồ",
+      clearance_address: "Địa chỉ giải tỏa",
+      amount_in_words: "Số tiền bằng chữ",
+      status: "Trạng thái",
+      createdAt: "Ngày tạo",
+      updatedAt: "Ngày cập nhật",
+    });
+  }
 
   // Hàm fetch data chính
   const fetchCitizens = async ({ page = 1, limit = 8, search = "" } = {}) => {
@@ -84,6 +110,7 @@ export default function CitizenPage() {
         map_sheet_number: cit.map_sheet_number || "",
         phuong: cit.phuong || "",
         district: cit.district || "",
+        status: cit.status || "",
         land_withdrawal_notice_no: cit.land_withdrawal_notice_no
           ? { ...cit.land_withdrawal_notice_no, ngay: normalizeDate(cit.land_withdrawal_notice_no.ngay) }
           : null,
@@ -179,42 +206,6 @@ export default function CitizenPage() {
     }
 
     return [];
-  };
-
-
-  const renderAttachment = (dinhKem) => {
-    if (!dinhKem) return null;
-
-    // Nếu BE trả về object
-    if (typeof dinhKem === "object" && dinhKem.url) {
-      return (
-        <a href={dinhKem.url} target="_blank" rel="noreferrer">
-          📎 {dinhKem.originalname || "Xem file"}
-        </a>
-      );
-    }
-
-    // Nếu BE trả về mảng object
-    if (Array.isArray(dinhKem)) {
-      return dinhKem.map((f, idx) => (
-        <div key={idx}>
-          <a href={f.url || f} target="_blank" rel="noreferrer">
-            📎 {f.originalname || f.name || `File ${idx + 1}`}
-          </a>
-        </div>
-      ));
-    }
-
-    // Nếu chỉ là string URL
-    if (typeof dinhKem === "string") {
-      return (
-        <a href={dinhKem} target="_blank" rel="noreferrer">
-          📎 Xem file
-        </a>
-      );
-    }
-
-    return null;
   };
 
 
@@ -357,8 +348,6 @@ export default function CitizenPage() {
           true
         ),
       };
-
-      console.log('Normalized values:', normalizedValues);
 
       let savedCitizen;
 
@@ -573,12 +562,20 @@ export default function CitizenPage() {
     }
   };
 
+  const statusMap = {
+    in_progress: "Đang thực hiện",
+    completed: "Hoàn thành",
+    draft: "Chưa hoàn thành",
+  };
+
+
 
   const columns = [
     { title: "Mã hộ dân", dataIndex: "household_id" },
     { title: "Họ tên", dataIndex: "owner_name" },
     { title: "SĐT", dataIndex: "contact_phone" },
     { title: "Địa chỉ", dataIndex: "permanent_address" },
+    { title: "Trạng thái", dataIndex: "status", render: (text) => statusMap[text] || text },
     {
       title: "Hành động",
       key: "action",
@@ -626,6 +623,118 @@ export default function CitizenPage() {
 
   ];
 
+  const sections = [
+    {
+      fields: [
+        { name: "household_id", label: "Mã hộ dân", type: "input" },
+        { name: "owner_name", label: "Họ và tên chủ sử dụng", type: "input" },
+        { name: "permanent_address", label: "Địa chỉ thường trú", type: "input" },
+        { name: "contact_phone", label: "Số điện thoại liên lạc", type: "input" },
+        { name: "clearance_address", label: "Địa chỉ giải tỏa", type: "input" },
+      ],
+    },
+    {
+      fields: [
+        {
+          label: "Số thửa, tờ theo BĐĐC 2002",
+          group: [
+            { name: "land_plot_number", label: "Số thửa", type: "input", inputCol: 4 },
+            { name: "map_sheet_number", label: "Số tờ", type: "input", inputCol: 4 },
+            { name: "phuong", label: "Phường", type: "input", inputCol: 6 },
+            { name: "district", label: "Quận", type: "input", inputCol: 6 },
+          ],
+        },
+      ],
+    },
+    {
+      fields: [
+        {
+          label: "Thông báo thu hồi đất",
+          group: [
+            { name: ["land_withdrawal_notice_no", "so"], type: "input", placeholder: "Số quyết định", inputCol: 4 },
+            { name: ["land_withdrawal_notice_no", "ngay"], type: "date", placeholder: "Ngày", inputCol: 6 },
+            { name: ["land_withdrawal_notice_no", "dinhKem"], type: "upload", inputCol: 14 },
+          ],
+        },
+        {
+          label: "Quyết định phê duyệt",
+          group: [
+            { name: ["land_withdrawal_decision_no", "so"], type: "input", placeholder: "Số quyết định", inputCol: 4 },
+            { name: ["land_withdrawal_decision_no", "ngay"], type: "date", placeholder: "Ngày", inputCol: 6 },
+            { name: ["land_withdrawal_decision_no", "dinhKem"], type: "upload", inputCol: 14 },
+          ],
+        },
+        {
+          label: "Phương án BT, HT, TĐC",
+          group: [
+            { name: ["compensation_plan_no", "so"], type: "input", placeholder: "Số quyết định", inputCol: 4 },
+            { name: ["compensation_plan_no", "ngay"], type: "date", placeholder: "Ngày", inputCol: 6 },
+            { name: ["compensation_plan_no", "dinhKem"], type: "upload", inputCol: 14 },
+          ],
+        },
+      ],
+    },
+    {
+      fields: [
+        {
+          label: "Đã nhận tiền bồi thường, hỗ trợ",
+          group: [
+            { name: ["compensation_received", "xacNhan"], type: "checkbox", inputCol: 4 },
+            { name: ["compensation_received", "ngay"], type: "date", inputCol: 6 },
+            { name: ["compensation_received", "dinhKem"], type: "upload", inputCol: 14 },
+          ],
+        },
+        {
+          label: "Đã bàn giao mặt bằng",
+          group: [
+            { name: ["site_handover", "xacNhan"], type: "checkbox", inputCol: 4 },
+            { name: ["site_handover", "ngay"], type: "date", inputCol: 6 },
+            { name: ["site_handover", "dinhKem"], type: "upload", inputCol: 14 },
+          ],
+        },
+      ],
+    },
+    {
+      fields: [
+        {
+          label: "Tổng số tiền bồi thường hỗ trợ",
+          group: [
+            {
+              name: "total_compensation_amount",
+              label: "Tổng số tiền bồi thường hỗ trợ",
+              type: "number",
+              inputCol: 8
+            },
+            {
+              name: "amount_in_words",
+              label: "Bằng chữ",
+              type: "input",
+              inputCol: 12
+            },
+          ],
+        },
+      ],
+    },
+    {
+      fields: [
+        {
+          name: "status",
+          label: "Trạng thái",
+          type: "select",
+          inputCol: 4,
+          options: [
+            { label: "Hoàn thành", value: "completed" },
+            { label: "Đang làm", value: "in_progress" },
+            { label: "Chưa hoàn thành", value: "draft" },
+          ],
+        },
+      ],
+    }
+  ]
+
+
+
+
   return (
     <div className="p-1">
       <div className="mb-3">
@@ -643,6 +752,14 @@ export default function CitizenPage() {
 
 
         <HeaderActions>
+          <Button
+            type="primary"
+            icon={<FileExcelOutlined />}
+            onClick={handleExport}
+            className="bg-green-600 border-green-600 hover:bg-green-700 hover:border-green-700"
+          >
+            Xuất Excel
+          </Button>
           <Button
             type="primary"
             icon={<PlusOutlined />}
@@ -681,279 +798,44 @@ export default function CitizenPage() {
       </Spin>
 
 
-
       {/* Modal xóa */}
-      <Modal
-        title="Xác nhận xóa"
-        open={isDeleteModalVisible}
+      <ConfirmDeleteModal
+        visible={isDeleteModalVisible}
         onOk={handleConfirmDelete}
         onCancel={() => {
           setIsDeleteModalVisible(false);
           setEditingCitizen(null);
         }}
-        okText="Xóa"
-        cancelText="Hủy"
-        okButtonProps={{ danger: true }}
-      >
-        <p>Bạn có chắc chắn muốn xóa hộ dân <strong>{editingCitizen?.owner_name}</strong>?</p>
-      </Modal>
-
+        loading={loading}
+        entityName="hộ dân"
+        itemName={editingCitizen?.owner_name}
+      />
       {/* Modal thêm/sửa */}
-      <Modal
+      <EditModal
         title={editingCitizen ? "Sửa thông tin hộ dân" : "Thêm hộ dân"}
-        open={isAddEditModalVisible}
+        visible={isAddEditModalVisible}
         onOk={handleAddEditCitizen}
         onCancel={() => {
           setIsAddEditModalVisible(false);
           form.resetFields();
           setEditingCitizen(null);
         }}
-        okText="Lưu"
-        cancelText="Hủy"
-        confirmLoading={saving}
+        loading={saving}
+        form={form}
         width={1400}
-        destroyOnClose
-      >
-        <Form form={form} layout="horizontal" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
-          <Divider orientation="left">Thông tin hộ dân</Divider>
-
-          {/* --- Thông tin cơ bản --- */}
-          {[
-            { label: "Mã hộ dân", name: "household_id" },
-            { label: "Họ và tên chủ sử dụng", name: "owner_name" },
-            { label: "Địa chỉ thường trú", name: "permanent_address" },
-            { label: "Số điện thoại liên lạc", name: "contact_phone" },
-            { label: "Địa chỉ giải tỏa", name: "clearance_address" },
-          ].map((field) => (
-            <Row gutter={16} key={field.name} style={{ marginBottom: 16 }} align="middle">
-              <Col span={4}>
-                <label style={{ fontWeight: 500 }}>{field.label}:</label>
-              </Col>
-              <Col span={8}>
-                <Form.Item name={field.name} style={{ marginBottom: 0 }}>
-                  <Input />
-                </Form.Item>
-              </Col>
-            </Row>
-          ))}
-
-          {/* --- Số thửa, tờ theo BĐĐC 2002 --- */}
-          <Row gutter={16} align="middle" style={{ marginBottom: 16 }}>
-            <Col span={4}><label>Số thửa, tờ theo BĐĐC 2002:</label></Col>
-            <Col span={4}><Form.Item name="land_plot_number"><Input placeholder="Số thửa" /></Form.Item></Col>
-            <Col span={4}><Form.Item name="map_sheet_number"><Input placeholder="Số tờ" /></Form.Item></Col>
-            <Col span={6}><Form.Item name="phuong"><Input placeholder="Phường" /></Form.Item></Col>
-            <Col span={6}><Form.Item name="district"><Input placeholder="Quận" /></Form.Item></Col>
-          </Row>
-
-          {/* --- Các object nested --- */}
-          {[
-            { label: "Thông báo thu hồi đất", name: "land_withdrawal_notice_no" },
-            { label: "Quyết định phê duyệt", name: "land_withdrawal_decision_no" },
-            { label: "Phương án BT, HT, TĐC", name: "compensation_plan_no" },
-            { label: "Đã nhận tiền bồi thường, hỗ trợ", name: "compensation_received", isCheckbox: true },
-            { label: "Đã bàn giao mặt bằng", name: "site_handover", isCheckbox: true },
-          ].map((field) => (
-            <Row gutter={16} align="middle" style={{ marginBottom: 16 }} key={field.name}>
-              <Col span={4}><label>{field.label}:</label></Col>
-
-              {/* Số / checkbox */}
-              <Col span={2}>
-                <Form.Item
-                  name={field.isCheckbox ? [field.name, "xacNhan"] : [field.name, "so"]}
-                  valuePropName={field.isCheckbox ? "checked" : undefined}
-                  style={{ marginBottom: 0 }}
-                >
-                  {field.isCheckbox ? <Checkbox /> : <Input placeholder="Số" />}
-                </Form.Item>
-              </Col>
-
-              {/* Ngày */}
-              <Col span={8}>
-                <Form.Item
-                  name={[field.name, "ngay"]}
-                  style={{ marginBottom: 0 }}
-                >
-                  <DatePicker format="DD/MM/YYYY" style={{ width: "100%" }} placeholder="Chọn ngày" />
-                </Form.Item>
-              </Col>
-
-              {/* Upload */}
-              <Col span={8}>
-                <Form.Item
-                  name={[field.name, "dinhKem"]}
-                  valuePropName="fileList"
-                  getValueFromEvent={(e) => e?.fileList || []}
-                  style={{ marginBottom: 0 }}
-                >
-                  <Upload
-                    listType="text"
-                    beforeUpload={() => false} // Prevent auto upload
-                    multiple
-                  >
-                    <Button icon={<UploadOutlined />}>Upload</Button>
-                  </Upload>
-                </Form.Item>
-              </Col>
-            </Row>
-          ))}
-
-          {/* --- Tổng số tiền bồi thường --- */}
-          <Row gutter={16} align="middle" style={{ marginBottom: 16 }}>
-            <Col span={4}><label>Tổng số tiền bồi thường hỗ trợ:</label></Col>
-            <Col span={6}>
-              <Form.Item name="total_compensation_amount">
-                <InputNumber
-                  style={{ width: "100%" }}
-                  formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
-                  parser={(value) => value.replace(/,/g, "")}
-                  placeholder="Nhập số tiền"
-                  addonAfter="đồng"
-                  controls={false}
-                />
-              </Form.Item>
-            </Col>
-            <Col span={14}>
-              <Form.Item name="amount_in_words">
-                <Input placeholder="Bằng chữ" />
-              </Form.Item>
-            </Col>
-          </Row>
-        </Form>
-      </Modal>
+        sections={sections}
+      />
 
       {/* Modal xem chi tiết */}
-      <Modal
-        title="Chi tiết dân cư"
-        open={isViewModalVisible}
-        onCancel={() => {
-          setIsViewModalVisible(false);
-          setViewingCitizen(null);
-        }}
-        footer={[
-          <Button key="close" onClick={() => {
-            setIsViewModalVisible(false);
-            setViewingCitizen(null);
-          }}>
-            Đóng
-          </Button>
-        ]}
-        width={1200}
-      >
-        {viewingCitizen && (
-          <div>
-            {/* --- Thông tin cơ bản --- */}
-            <Divider orientation="left">Thông tin cơ bản</Divider>
+      <ViewModal
+        title="Xem thông tin hộ dân"
+        visible={isViewModalVisible}
+        onCancel={() => setIsViewModalVisible(false)}
+        width={1400}
+        sections={sections}
+        record={viewingCitizen}
+      />
 
-            {[
-              { label: "Mã hộ dân", value: viewingCitizen.household_id },
-              { label: "Họ tên", value: viewingCitizen.owner_name },
-              { label: "SĐT", value: viewingCitizen.contact_phone },
-              { label: "Địa chỉ", value: viewingCitizen.permanent_address },
-            ].map((field, index) => (
-              <Row key={index} style={{ marginBottom: 12 }} align="middle">
-                <Col span={4}>
-                  <label style={{ fontWeight: 500 }}>{field.label}:</label>
-                </Col>
-                <Col span={20}>
-                  <span>{field.value || "Chưa có thông tin"}</span>
-                </Col>
-              </Row>
-            ))}
-
-            {/* --- Thông tin đất đai --- */}
-            <Divider orientation="left">Thông tin đất đai</Divider>
-            <Row style={{ marginBottom: 12 }} align="middle">
-              <Col span={4}><label style={{ fontWeight: 500 }}>Số thửa, tờ theo BĐĐC 2002:</label></Col>
-              <Col span={4}><span><b>Số thửa:</b> {viewingCitizen.land_plot_number || "N/A"}</span></Col>
-              <Col span={4}><span><b>Số tờ:</b> {viewingCitizen.map_sheet_number || "N/A"}</span></Col>
-              <Col span={6}><span><b>Phường:</b> {viewingCitizen.phuong || "N/A"}</span></Col>
-              <Col span={6}><span><b>Quận:</b> {viewingCitizen.district || "N/A"}</span></Col>
-            </Row>
-
-
-            {/* --- Thông báo thu hồi đất --- */}
-            <Divider orientation="left">Thông báo thu hồi đất</Divider>
-            <Row gutter={16} style={{ marginBottom: 12 }}>
-              <Col span={4}><label style={{ fontWeight: 500 }}>Thông báo thu hồi đất:</label></Col>
-              <Col span={4}><span><b>Số:</b> {viewingCitizen?.land_withdrawal_notice_no?.so || "N/A"}</span></Col>
-              <Col span={8}>
-                <span><b>Ngày:</b> {viewingCitizen?.land_withdrawal_notice_no?.ngay || "N/A"}</span>
-              </Col>
-              <Col span={8}>
-                {renderAttachment(viewingCitizen?.land_withdrawal_notice_no?.dinhKem)}
-              </Col>
-
-            </Row>
-
-            {/* --- Quyết định phê duyệt --- */}
-            <Divider orientation="left">Quyết định phê duyệt</Divider>
-            <Row gutter={16} style={{ marginBottom: 12 }}>
-              <Col span={4}><label style={{ fontWeight: 500 }}>Quyết định phê duyệt:</label></Col>
-              <Col span={4}><span><b>Số:</b> {viewingCitizen?.land_withdrawal_decision_no?.so || "N/A"}</span></Col>
-              <Col span={8}>
-                <span><b>Ngày:</b> {viewingCitizen?.land_withdrawal_decision_no?.ngay || "N/A"}</span>
-              </Col>
-              <Col span={8}>
-                {renderAttachment(viewingCitizen?.land_withdrawal_decision_no?.dinhKem)}
-              </Col>
-            </Row>
-
-            {/* --- Phương án BT, HT, TĐC --- */}
-            <Divider orientation="left">Phương án BT, HT, TĐC</Divider>
-            <Row gutter={16} style={{ marginBottom: 12 }}>
-              <Col span={4}><label style={{ fontWeight: 500 }}>Phương án BT, HT, TĐC:</label></Col>
-              <Col span={4}><span><b>Số:</b> {viewingCitizen?.compensation_plan_no?.so || "N/A"}</span></Col>
-              <Col span={8}>
-                <span><b>Ngày:</b> {viewingCitizen?.compensation_plan_no?.ngay || "N/A"}</span>
-              </Col>
-              <Col span={8}>
-                {renderAttachment(viewingCitizen?.compensation_plan_no?.dinhKem)}
-              </Col>
-            </Row>
-
-            {/* --- Thông tin bồi thường --- */}
-            {(viewingCitizen.total_compensation_amount || viewingCitizen.amount_in_words) && (
-              <>
-                <Divider orientation="left">Thông tin bồi thường</Divider>
-                <Row style={{ marginBottom: 12 }}>
-                  <Col span={4}><label style={{ fontWeight: 500 }}>Tổng số tiền:</label></Col>
-                  <Col span={10}>
-                    <span>
-                      {viewingCitizen.total_compensation_amount ? `${viewingCitizen.total_compensation_amount}`.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + " đồng" : "0 đồng"}
-                    </span>
-                  </Col>
-                  <Col span={10}><span><b>Bằng chữ:</b> {viewingCitizen.amount_in_words || "Chưa có"}</span></Col>
-                </Row>
-              </>
-            )}
-
-            {/* --- Trạng thái thực hiện --- */}
-            <Divider orientation="left">Trạng thái thực hiện</Divider>
-            {[
-              { label: "Đã nhận tiền bồi thường, hỗ trợ", data: viewingCitizen?.compensation_received },
-              { label: "Đã bàn giao mặt bằng", data: viewingCitizen?.site_handover }
-            ].map((status, index) => (
-              <Row key={index} gutter={16} style={{ marginBottom: 12 }}>
-                <Col span={4}><label style={{ fontWeight: 500 }}>{status.label}:</label></Col>
-                <Col span={4}>
-                  <span style={{ color: status.data?.xacNhan ? '#52c41a' : '#ff4d4f', fontWeight: 500 }}>
-                    {status.data?.xacNhan ? "✓ Đã thực hiện" : "✗ Chưa thực hiện"}
-                  </span>
-                </Col>
-                <Col span={8}>
-                  {status.data?.ngay && (
-                    <span><b>Ngày:</b> {status.data.ngay}</span>
-                  )}
-                </Col>
-                <Col span={8}>
-                  {renderAttachment(status.data?.dinhKem)}
-                </Col>
-              </Row>
-            ))}
-          </div>
-        )}
-      </Modal>
     </div>
   );
 }

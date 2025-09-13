@@ -16,6 +16,7 @@ import {
   Select,
   InputNumber,
   Space,
+  Dropdown,
 } from "antd";
 import { DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, UploadOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
@@ -36,6 +37,7 @@ import { PageHeader, FilterContainer, HeaderActions, CenteredAction } from "./st
 import { useLocation, useNavigate } from "react-router-dom";
 import FormUpload from "../../../components/Admin/FormUpload/FormUpload";
 import { uploadFile } from "../../../services/FileService";
+import { FiMoreVertical } from "react-icons/fi";
 
 export default function ProjectPage() {
   const [projects, setProjects] = useState([]);
@@ -147,13 +149,23 @@ export default function ProjectPage() {
     if (projects.length === 0) return;
 
     const reopenData = localStorage.getItem("reopenModal");
-    console.log('reopenData', reopenData);
+    const tempFormData = localStorage.getItem("tempFormData");
+
+    console.log('reopenData:', reopenData);
+    console.log('tempFormData:', tempFormData);
 
     if (!reopenData) return;
 
     try {
-      const { type, projectId, restoreData } = JSON.parse(reopenData);
+      const { type, projectId } = JSON.parse(reopenData);
+      let restoreData = null;
+
+      if (tempFormData) {
+        restoreData = JSON.parse(tempFormData);
+      }
+
       localStorage.removeItem("reopenModal");
+      localStorage.removeItem("tempFormData");
 
       const proj = projects.find(p => p.id === projectId || p.key === projectId);
 
@@ -162,135 +174,96 @@ export default function ProjectPage() {
         setIsViewModalVisible(true);
       }
       else if (type === "edit" && proj) {
-        openModal(proj);
+        openModal(proj, restoreData);
       }
       else if (type === "add" && projectId === "new") {
-        openModal(null);
-
-        // Restore dữ liệu form nếu có
-        if (restoreData?.formValues) {
-          const formattedValues = {
-            ...restoreData.formValues,
-            approval_date: restoreData.formValues.approval_date ? dayjs(restoreData.formValues.approval_date) : null,
-            map_approval_date: restoreData.formValues.map_approval_date ? dayjs(restoreData.formValues.map_approval_date) : null,
-            land_price_approval_date: restoreData.formValues.land_price_approval_date ? dayjs(restoreData.formValues.land_price_approval_date) : null,
-            plan_approval_date: restoreData.formValues.plan_approval_date ? dayjs(restoreData.formValues.plan_approval_date) : null,
-            compensation_plan_approval_date: restoreData.formValues.compensation_plan_approval_date ? dayjs(restoreData.formValues.compensation_plan_approval_date) : null,
-            site_clearance_start_date: restoreData.formValues.site_clearance_start_date ? dayjs(restoreData.formValues.site_clearance_start_date) : null,
-          };
-          form.setFieldsValue(formattedValues);
-        }
-
-        if (restoreData?.selectedHouseholds) {
-          dispatch(setSelectedHouseholds(restoreData.selectedHouseholds));
-        }
-        if (restoreData?.selectedEmployees) {
-          dispatch(setSelectedEmployees(restoreData.selectedEmployees));
-        }
-        if (restoreData?.selectedLandPrices) {
-          dispatch(setSelectedLandPrices(restoreData.selectedLandPrices));
-        }
+        openModal(null, restoreData);
       }
     } catch (err) {
       console.error("Error parsing reopenModal data:", err);
       localStorage.removeItem("reopenModal");
+      localStorage.removeItem("tempFormData");
     }
   }, [projects]);
 
+  // ================== Helper function to convert DB files to upload format ==================
+  const convertDbFilesToUploadFormat = (files) => {
+    if (!files) return [];
 
-  // ================== Set form values khi editingProject thay đổi ==================
-  useEffect(() => {
-    if (!editingProject) return;
-    const formValues = {
-      project_code: editingProject.project_code,
-      project_name: editingProject.name,
-      investor: editingProject.investor,
-      approval_decision_no: editingProject.approval_decision_no,
-      approval_date: editingProject.approval_date ? dayjs(editingProject.approval_date) : null,
-      map_no: editingProject.map_no,
-      map_approval_date: editingProject.map_approval_date ? dayjs(editingProject.map_approval_date) : null,
-      land_price_decision_no: editingProject.land_price_decision_no,
-      land_price_approval_date: editingProject.land_price_approval_date ? dayjs(editingProject.land_price_approval_date) : null,
-      compensation_plan_decision_no: editingProject.compensation_plan_decision_no,
-      compensation_plan_approval_date: editingProject.compensation_plan_approval_date ? dayjs(editingProject.compensation_plan_approval_date) : null,
-      compensation_plan_no: editingProject.compensation_plan_no,
-      plan_approval_date: editingProject.plan_approval_date ? dayjs(editingProject.plan_approval_date) : null,
-      site_clearance_start_date: editingProject.site_clearance_start_date ? dayjs(editingProject.site_clearance_start_date) : null,
-      project_status: editingProject.project_status,
-      project_objectives: editingProject.project_objectives,
-      project_scale: editingProject.project_scale,
-      project_location: editingProject.project_location,
-      construction_cost: editingProject.construction_cost,
-      project_management_cost: editingProject.project_management_cost,
-      consulting_cost: editingProject.consulting_cost,
-      other_costs: editingProject.other_costs,
-      contingency_cost: editingProject.contingency_cost,
-      land_clearance_cost: editingProject.land_clearance_cost,
-      start_point: editingProject.start_point,
-      end_point: editingProject.end_point,
-      total_length: editingProject.total_length,
-      funding_source: editingProject.funding_source,
-      resettlement_plan: editingProject.resettlement_plan,
-      other_documents: editingProject.other_documents,
-      approval_decision_file: convertFileList(editingProject.approval_decision_file),
-      map_file: convertFileList(editingProject.map_file),
-      land_price_file: convertFileList(editingProject.land_price_file),
-      plan_file: convertFileList(editingProject.plan_file),
-      compensation_plan_file: convertFileList(editingProject.compensation_plan_file),
-      other_files: convertFileList(editingProject.other_files),
+    const extractOriginalFileName = (url) => {
+      const fullName = decodeURIComponent(url.split("/").pop().split("?")[0]);
+      // Bỏ phần UUID và timestamp, chỉ lấy tên file gốc
+      const parts = fullName.split("_");
+      if (parts.length > 1) {
+        return parts.slice(1).join("_");
+      }
+      return fullName.substring(fullName.indexOf("-") + 1);
     };
 
-    form.setFieldsValue(formValues);
-
-    dispatch(setSelectedHouseholds((editingProject.households || []).map(id => ({ id }))));
-    dispatch(setSelectedEmployees((editingProject.employees || []).map(id => ({ id }))));
-    dispatch(setSelectedLandPrices((editingProject.lands || []).map(id => ({ id }))));
-  }, [editingProject, form, dispatch]);
-
-  // ================== Restore tempFormData khi mở modal ==================
-  useEffect(() => {
-    if (!isModalVisible) return;
-    const tempData = localStorage.getItem("tempFormData");
-    if (!tempData) return;
-
-    try {
-      const { formValues, selectedHouseholds, selectedEmployees, selectedLandPrices } = JSON.parse(tempData);
-
-      if (formValues) {
-        const formattedValues = {
-          ...formValues,
-          approval_date: formValues.approval_date ? dayjs(formValues.approval_date) : null,
-          map_approval_date: formValues.map_approval_date ? dayjs(formValues.map_approval_date) : null,
-          land_price_approval_date: formValues.land_price_approval_date ? dayjs(formValues.land_price_approval_date) : null,
-          plan_approval_date: formValues.plan_approval_date ? dayjs(formValues.plan_approval_date) : null,
-          compensation_plan_approval_date: formValues.compensation_plan_approval_date ? dayjs(formValues.compensation_plan_approval_date) : null,
-          site_clearance_start_date: formValues.site_clearance_start_date ? dayjs(formValues.site_clearance_start_date) : null,
-        };
-        form.setFieldsValue(formattedValues);
-      }
-
-      if (selectedHouseholds?.length) dispatch(setSelectedHouseholds(selectedHouseholds));
-      if (selectedEmployees?.length) dispatch(setSelectedEmployees(selectedEmployees));
-      if (selectedLandPrices?.length) dispatch(setSelectedLandPrices(selectedLandPrices));
-
-      localStorage.removeItem("tempFormData");
-    } catch (err) {
-      console.error("Error parsing temporary data:", err);
-      localStorage.removeItem("tempFormData");
+    // Nếu là string (1 file)
+    if (typeof files === "string") {
+      return [{
+        uid: Date.now().toString(),
+        name: extractOriginalFileName(files),
+        status: 'done',
+        url: files,
+        response: { url: files }
+      }];
     }
-  }, [isModalVisible, form, dispatch]);
-  // ================== Open modal ==================
-  const openModal = (project = null) => {
+
+    // Nếu là array
+    if (Array.isArray(files)) {
+      return files.map((fileUrl, index) => ({
+        uid: `${Date.now()}-${index}`,
+        name: extractOriginalFileName(fileUrl),
+        status: 'done',
+        url: fileUrl,
+        response: { url: fileUrl }
+      }));
+    }
+
+    return [];
+  };
+
+  // ================== Open modal - FIXED VERSION ==================
+  const openModal = (project = null, restoreData = null) => {
     form.resetFields();
     setEditingProject(project);
 
     if (!project) {
-      // 👉 Thêm mới: clear state chọn hộ dân & nhân viên
-      dispatch(clearHouseholds());
-      dispatch(clearEmployees());
-      dispatch(clearLandPrices());
+      // Thêm mới
+      if (restoreData) {
+        // Restore dữ liệu đã lưu
+        const formattedValues = {
+          ...restoreData.formValues,
+          approval_date: restoreData.formValues.approval_date ? dayjs(restoreData.formValues.approval_date) : null,
+          map_approval_date: restoreData.formValues.map_approval_date ? dayjs(restoreData.formValues.map_approval_date) : null,
+          land_price_approval_date: restoreData.formValues.land_price_approval_date ? dayjs(restoreData.formValues.land_price_approval_date) : null,
+          plan_approval_date: restoreData.formValues.plan_approval_date ? dayjs(restoreData.formValues.plan_approval_date) : null,
+          compensation_plan_approval_date: restoreData.formValues.compensation_plan_approval_date ? dayjs(restoreData.formValues.compensation_plan_approval_date) : null,
+          site_clearance_start_date: restoreData.formValues.site_clearance_start_date ? dayjs(restoreData.formValues.site_clearance_start_date) : null,
+        };
+
+        form.setFieldsValue(formattedValues);
+
+        // Restore selected data
+        if (restoreData.selectedHouseholds) {
+          dispatch(setSelectedHouseholds(restoreData.selectedHouseholds));
+        }
+        if (restoreData.selectedEmployees) {
+          dispatch(setSelectedEmployees(restoreData.selectedEmployees));
+        }
+        if (restoreData.selectedLandPrices) {
+          dispatch(setSelectedLandPrices(restoreData.selectedLandPrices));
+        }
+      } else {
+        // Clear state cho thêm mới
+        dispatch(clearHouseholds());
+        dispatch(clearEmployees());
+        dispatch(clearLandPrices());
+      }
     } else {
-      // 👉 Sửa: map dữ liệu project vào form
+      // Sửa project
       const formValues = {
         project_code: project.project_code,
         project_name: project.name,
@@ -322,19 +295,146 @@ export default function ProjectPage() {
         funding_source: project.funding_source,
         resettlement_plan: project.resettlement_plan,
         other_documents: project.other_documents,
+        // Convert files
+        approval_decision_file: convertDbFilesToUploadFormat(project.approval_decision_file),
+        map_file: convertDbFilesToUploadFormat(project.map_file),
+        land_price_file: convertDbFilesToUploadFormat(project.land_price_file),
+        plan_file: convertDbFilesToUploadFormat(project.plan_file),
+        compensation_plan_file: convertDbFilesToUploadFormat(project.compensation_plan_file),
+        other_files: convertDbFilesToUploadFormat(project.other_documents),
       };
 
       form.setFieldsValue(formValues);
 
-      // 👉 Nếu households/employees đã load ở trang khác thì chỉ cần dispatch lại
-      dispatch(setSelectedHouseholds(project.households || []));
-      dispatch(setSelectedEmployees(project.employees || []));
-      dispatch(setSelectedLandPrices(project.lands || []));
+      // Set selected data từ project hoặc restoreData
+      if (restoreData) {
+        // Ưu tiên dữ liệu từ restore (đã được update)
+        if (restoreData.selectedHouseholds) {
+          dispatch(setSelectedHouseholds(restoreData.selectedHouseholds));
+        }
+        if (restoreData.selectedEmployees) {
+          dispatch(setSelectedEmployees(restoreData.selectedEmployees));
+        }
+        if (restoreData.selectedLandPrices) {
+          dispatch(setSelectedLandPrices(restoreData.selectedLandPrices));
+        }
+
+        // Restore form data nếu có thay đổi
+        if (restoreData.formValues) {
+          const formattedRestoreValues = {
+            ...restoreData.formValues,
+            approval_date: restoreData.formValues.approval_date ? dayjs(restoreData.formValues.approval_date) : formValues.approval_date,
+            map_approval_date: restoreData.formValues.map_approval_date ? dayjs(restoreData.formValues.map_approval_date) : formValues.map_approval_date,
+            land_price_approval_date: restoreData.formValues.land_price_approval_date ? dayjs(restoreData.formValues.land_price_approval_date) : formValues.land_price_approval_date,
+            plan_approval_date: restoreData.formValues.plan_approval_date ? dayjs(restoreData.formValues.plan_approval_date) : formValues.plan_approval_date,
+            compensation_plan_approval_date: restoreData.formValues.compensation_plan_approval_date ? dayjs(restoreData.formValues.compensation_plan_approval_date) : formValues.compensation_plan_approval_date,
+            site_clearance_start_date: restoreData.formValues.site_clearance_start_date ? dayjs(restoreData.formValues.site_clearance_start_date) : formValues.site_clearance_start_date,
+          };
+          form.setFieldsValue({ ...formValues, ...formattedRestoreValues });
+        }
+      } else {
+        // Dữ liệu gốc từ project
+        dispatch(setSelectedHouseholds((project.households || []).map(id => ({ id }))));
+        dispatch(setSelectedEmployees((project.employees || []).map(id => ({ id }))));
+        const landsArray = Array.isArray(project.lands) ? project.lands : [];
+        dispatch(setSelectedLandPrices(landsArray.map(id => ({ id }))));
+
+      }
     }
 
     setIsModalVisible(true);
   };
 
+  // ================== Navigation functions với save data ==================
+  const navigateToHouseholdsEdit = () => {
+    const formData = form.getFieldsValue(true);
+    const dataToSave = {
+      formValues: formData,
+      selectedHouseholds,
+      selectedEmployees,
+      selectedLandPrices
+    };
+
+    localStorage.setItem("tempFormData", JSON.stringify(dataToSave));
+    setIsModalVisible(false);
+    localStorage.setItem("reopenModal", JSON.stringify({
+      type: editingProject ? "edit" : "add",
+      projectId: editingProject?.id || "new"
+    }));
+    navigate(`/system/admin/households/${editingProject?.id || "new"}/edit`);
+  };
+
+  const navigateToLandPricesEdit = () => {
+    const formData = form.getFieldsValue(true);
+    const dataToSave = {
+      formValues: formData,
+      selectedHouseholds,
+      selectedEmployees,
+      selectedLandPrices
+    };
+
+    localStorage.setItem("tempFormData", JSON.stringify(dataToSave));
+    setIsModalVisible(false);
+    localStorage.setItem("reopenModal", JSON.stringify({
+      type: editingProject ? "edit" : "add",
+      projectId: editingProject?.id || "new"
+    }));
+    navigate(`/system/admin/lands/${editingProject?.id || "new"}/edit`);
+  };
+
+  const navigateToEmployeesEdit = () => {
+    const formData = form.getFieldsValue(true);
+    const dataToSave = {
+      formValues: formData,
+      selectedHouseholds,
+      selectedEmployees,
+      selectedLandPrices
+    };
+
+    localStorage.setItem("tempFormData", JSON.stringify(dataToSave));
+    setIsModalVisible(false);
+    localStorage.setItem("reopenModal", JSON.stringify({
+      type: editingProject ? "edit" : "add",
+      projectId: editingProject?.id || "new"
+    }));
+    navigate(`/system/admin/employees/${editingProject?.id || "new"}/edit`);
+  };
+
+  const navigateToHouseholdsAdd = () => {
+    const formData = form.getFieldsValue(true);
+    const dataToSave = {
+      formValues: formData,
+      selectedHouseholds,
+      selectedEmployees,
+      selectedLandPrices
+    };
+
+    localStorage.setItem("tempFormData", JSON.stringify(dataToSave));
+    setIsModalVisible(false);
+    localStorage.setItem("reopenModal", JSON.stringify({
+      type: "add",
+      projectId: "new"
+    }));
+    navigate(`/system/admin/households/new/add`);
+  };
+
+  const navigateToLandPricesAdd = () => {
+    const formData = form.getFieldsValue(true);
+    const dataToSave = {
+      formValues: formData,
+      selectedHouseholds,
+      selectedEmployees,
+      selectedLandPrices
+    };
+
+    localStorage.setItem("tempFormData", JSON.stringify(dataToSave));
+    setIsModalVisible(false);
+    localStorage.setItem("reopenModal", JSON.stringify({
+      type: "add",
+      projectId: "new"
+    }));
+    navigate(`/system/admin/lands/new/add`);
+  };
 
   // ================== Add / Update ==================
   const handleSubmit = async (values) => {
@@ -419,7 +519,6 @@ export default function ProjectPage() {
         households: selectedHouseholds.map(h => h.id).filter(Boolean),
         employees: selectedEmployees.map(e => e.id).filter(Boolean),
         lands: selectedLandPrices.map(e => e.id).filter(Boolean),
-
       };
 
       let result;
@@ -431,7 +530,7 @@ export default function ProjectPage() {
         message.success("Thêm dự án thành công!");
       }
 
-      // Xử lý cập nhật state local như trước
+      // Xử lý cập nhật state local
       const savedProject = result.data || result;
       const parsedHouseholds = typeof savedProject.households === 'string' ? JSON.parse(savedProject.households) : (savedProject.households || []);
       const parsedEmployees = typeof savedProject.employees === 'string' ? JSON.parse(savedProject.employees) : (savedProject.employees || []);
@@ -453,8 +552,10 @@ export default function ProjectPage() {
         setFilteredProjects(prev => [...prev, projectItem]);
       }
 
+      // Clean up
       localStorage.removeItem("tempProjectData");
-      localStorage.removeItem("selectedHouseholdsForNewProject");
+      localStorage.removeItem("tempFormData");
+      localStorage.removeItem("reopenModal");
       dispatch(clearHouseholds());
       dispatch(clearEmployees());
       dispatch(clearLandPrices());
@@ -514,7 +615,6 @@ export default function ProjectPage() {
     return "Chưa có file";
   };
 
-
   // ================== Delete ==================
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
   const [currentProject, setCurrentProject] = useState(null);
@@ -544,30 +644,76 @@ export default function ProjectPage() {
     {
       title: "Hành động",
       key: "action",
-      render: (_, record) => (
-        <CenteredAction>
-          <Tooltip title="Xem chi tiết">
-            <Button type="link" icon={<EyeOutlined />} onClick={() => { setViewProject(record); setIsViewModalVisible(true); }} />
-          </Tooltip>
-          <Tooltip title="Sửa dự án">
-            <Button type="link" icon={<EditOutlined />} onClick={() => openModal(record)} />
-          </Tooltip>
-          <Tooltip title="Xóa dự án">
-            <Button type="link" icon={<DeleteOutlined />} danger onClick={() => handleDelete(record)} />
-          </Tooltip>
-        </CenteredAction>
-      ),
-    },
+      render: (_, record) => {
+        const items = [
+          {
+            key: "view",
+            label: "Xem chi tiết",
+            icon: <EyeOutlined />,
+            onClick: () => {
+              if (setViewProject && setIsViewModalVisible) {
+                setViewProject(record);
+                setIsViewModalVisible(true);
+              } else {
+                console.log("Xem chi tiết:", record);
+              }
+            },
+          },
+          {
+            key: "edit",
+            label: "Sửa",
+            icon: <EditOutlined />,
+            onClick: () => {
+              if (openModal) {
+                openModal(record);
+              } else {
+                console.log("Sửa dự án:", record);
+              }
+            },
+          },
+          {
+            key: "delete",
+            label: "Xóa",
+            icon: <DeleteOutlined />,
+            onClick: () => {
+              if (handleDelete) {
+                handleDelete(record);
+              } else {
+                console.log("Xóa dự án:", record);
+              }
+            },
+          },
+        ];
+
+        return (
+          <Dropdown
+            menu={{
+              items,
+              onClick: (e) => {
+                const item = items.find((i) => i.key === e.key);
+                if (item?.onClick) item.onClick();
+              },
+            }}
+            trigger={["click"]}
+          >
+            <Button type="link">
+              <FiMoreVertical className="text-xl text-gray-600 hover:text-blue-600" />
+            </Button>
+          </Dropdown>
+        );
+      },
+    }
+
   ];
 
   // ================== Search ==================
-  // useEffect(() => {
-  //   const keyword = searchKeyword.toLowerCase();
-  //   setFilteredProjects(projects.filter(p =>
-  //     p.name.toLowerCase().includes(keyword) ||
-  //     p.project_code.toLowerCase().includes(keyword)
-  //   ));
-  // }, [searchKeyword, projects]);
+  useEffect(() => {
+    const keyword = searchKeyword.toLowerCase();
+    setFilteredProjects(projects.filter(p =>
+      p.name.toLowerCase().includes(keyword) ||
+      p.project_code.toLowerCase().includes(keyword)
+    ));
+  }, [searchKeyword, projects]);
 
   return (
     <div className="p-1">
@@ -576,7 +722,7 @@ export default function ProjectPage() {
         </h2>
       </div>
 
-      <FilterContainer>
+      <FilterContainer className="flex justify-between items-center mb-4">
         <Input
           placeholder="Tìm dự án..."
           value={searchKeyword}
@@ -600,7 +746,6 @@ export default function ProjectPage() {
             bordered
             rowKey="key"
             className="text-sm [&_.ant-table]:text-sm [&_.ant-table-cell]:px-3 [&_.ant-table-cell]:py-2"
-
           />
         </div>
       </Spin>
@@ -842,6 +987,11 @@ export default function ProjectPage() {
           setIsModalVisible(false);
           setEditingProject(null);
           form.resetFields();
+          dispatch(clearHouseholds());
+          dispatch(clearEmployees());
+          dispatch(clearLandPrices());
+          localStorage.removeItem("tempFormData");
+          localStorage.removeItem("reopenModal");
         }}
         footer={null}
         width={1200}
@@ -873,21 +1023,7 @@ export default function ProjectPage() {
                     <Button
                       type="link"
                       icon={<EditOutlined />}
-                      onClick={() => {
-                        const formData = form.getFieldsValue();
-                        localStorage.setItem("tempFormData", JSON.stringify({
-                          formValues: formData,
-                          selectedHouseholds,
-                          selectedEmployees,
-                          selectedLandPrices
-                        }));
-                        setIsModalVisible(false);
-                        localStorage.setItem("reopenModal", JSON.stringify({
-                          type: "edit",
-                          projectId: editingProject?.id
-                        }));
-                        navigate(`/system/admin/households/${editingProject?.id}/edit`);
-                      }}
+                      onClick={navigateToHouseholdsEdit}
                     >
                       Sửa hộ dân
                     </Button>
@@ -895,21 +1031,7 @@ export default function ProjectPage() {
                     <Button
                       type="dashed"
                       icon={<PlusOutlined />}
-                      onClick={() => {
-                        const formData = form.getFieldsValue(true);
-                        localStorage.setItem("tempFormData", JSON.stringify({
-                          formValues: formData,
-                          selectedHouseholds,
-                          selectedEmployees,
-                          selectedLandPrices
-                        }));
-                        setIsModalVisible(false);
-                        localStorage.setItem("reopenModal", JSON.stringify({
-                          type: "add",
-                          projectId: "new"
-                        }));
-                        navigate(`/system/admin/households/new/add`);
-                      }}
+                      onClick={navigateToHouseholdsAdd}
                     >
                       Thêm hộ dân
                     </Button>
@@ -925,21 +1047,7 @@ export default function ProjectPage() {
                     <Button
                       type="link"
                       icon={<EditOutlined />}
-                      onClick={() => {
-                        const formData = form.getFieldsValue();
-                        localStorage.setItem("tempFormData", JSON.stringify({
-                          formValues: formData,
-                          selectedHouseholds,
-                          selectedEmployees,
-                          selectedLandPrices
-                        }));
-                        setIsModalVisible(false);
-                        localStorage.setItem("reopenModal", JSON.stringify({
-                          type: "edit",
-                          projectId: editingProject?.id
-                        }));
-                        navigate(`/system/admin/lands/${editingProject?.id}/edit`);
-                      }}
+                      onClick={navigateToLandPricesEdit}
                     >
                       Sửa đơn giá đất
                     </Button>
@@ -947,21 +1055,7 @@ export default function ProjectPage() {
                     <Button
                       type="dashed"
                       icon={<PlusOutlined />}
-                      onClick={() => {
-                        const formData = form.getFieldsValue(true);
-                        localStorage.setItem("tempFormData", JSON.stringify({
-                          formValues: formData,
-                          selectedHouseholds,
-                          selectedEmployees,
-                          selectedLandPrices
-                        }));
-                        setIsModalVisible(false);
-                        localStorage.setItem("reopenModal", JSON.stringify({
-                          type: "add",
-                          projectId: "new"
-                        }));
-                        navigate(`/system/admin/lands/new/add`);
-                      }}
+                      onClick={navigateToLandPricesAdd}
                     >
                       Thêm đơn giá đất
                     </Button>
@@ -1241,21 +1335,7 @@ export default function ProjectPage() {
               <Button
                 type="link"
                 icon={<PlusOutlined />}
-                onClick={() => {
-                  const formData = form.getFieldsValue();
-                  localStorage.setItem("tempFormData", JSON.stringify({
-                    formValues: formData,
-                    selectedHouseholds,
-                    selectedEmployees,
-                    selectedLandPrices
-                  }));
-                  setIsModalVisible(false);
-                  localStorage.setItem("reopenModal", JSON.stringify({
-                    type: editingProject ? "edit" : "add",
-                    projectId: editingProject?.id || "new"
-                  }));
-                  navigate(`/system/admin/employees/${editingProject?.id || "new"}/edit`);
-                }}
+                onClick={navigateToEmployeesEdit}
               >
                 Thêm nhân viên
               </Button>
@@ -1287,6 +1367,6 @@ export default function ProjectPage() {
           </Row>
         </Form>
       </Modal>
-    </div >
+    </div>
   );
 }

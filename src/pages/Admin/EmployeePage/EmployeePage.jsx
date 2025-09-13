@@ -4,6 +4,7 @@ import { DeleteOutlined, EditOutlined, EyeOutlined } from "@ant-design/icons";
 import * as UserService from "../../../services/UserService";
 import { FiMoreVertical } from "react-icons/fi";
 import { FilterContainer, HeaderActions } from "./style";
+import ConfirmDeleteModal from "../../../components/ModalComponent/ConfirmDeleteModal";
 
 const { Option } = Select;
 
